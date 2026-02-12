@@ -1,0 +1,27 @@
+[package]
+name = "ranim_midi_visualizer_lib"
+version = "0.1.0"
+edition = "2024"
+
+# [lib]
+# crate-type = ["cdylib"]
+
+[dependencies]
+ranim = { workspace = true }
+ranim-macros = { workspace = true }
+midly = "0.5.3"
+serde = { version = "1.0.228", optional = true }
+itoa = "1.0.17"
+malachite-base = "0.9.1"
+itertools = "0.14.0"
+
+[dependencies.derive_more]
+version = "2.1.1"
+features = ["deref", "deref_mut", "index", "index_mut", "into_iterator"]
+
+[dependencies.interavl]
+git = "https://github.com/vanleefxp/interavl_fork.git"
+features = ["serde", "closest"]
+
+[features]
+serde = ["dep:serde"]

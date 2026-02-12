@@ -1,0 +1,34 @@
+[package]
+name = "ranim_midi_visualizer"
+version = "0.1.0"
+edition = "2024"
+authors = ["F.X.P. <litran39@hotmail.com>"]
+description = "A MIDI visualizer that renders the notes of a MIDI file as a scrolling video. Powered by Rust and `ranim` library."
+license = "MIT"
+
+[dependencies]
+ranim = { workspace = true }
+anyhow = "1.0.101"
+itertools = "0.14.0"
+tracing = "0.1.44"
+tracing-indicatif = "0.3.14"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+uncased = "0.9.10"
+color = "0.3.2"
+
+[dependencies.clap]
+version = "4.5.57"
+features = ["cargo"]
+
+[dependencies.ranim_midi_visualizer_lib]
+path = "crates/ranim_midi_visualizer_lib"
+features = ["serde"]
+
+[workspace.dependencies.ranim]
+git = "https://github.com/AzurIce/ranim.git"
+branch = "main"
+features = ["render"]
+
+[workspace.dependencies.ranim-macros]
+git = "https://github.com/AzurIce/ranim.git"
+branch = "main"
