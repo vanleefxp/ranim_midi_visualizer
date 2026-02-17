@@ -15,6 +15,7 @@ tracing-indicatif = "0.3.14"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 uncased = "0.9.10"
 color = "0.3.2"
+phf = { version = "0.13.1", features = ["macros", "uncased"] }
 
 [dependencies.clap]
 version = "4.5.57"
@@ -27,7 +28,8 @@ features = ["serde"]
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
 branch = "main"
-features = ["render"]
+features = ["render", "preview"]
+
 
 [workspace.dependencies.ranim-macros]
 git = "https://github.com/AzurIce/ranim.git"

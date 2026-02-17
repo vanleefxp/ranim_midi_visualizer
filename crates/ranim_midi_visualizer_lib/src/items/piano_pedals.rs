@@ -77,7 +77,10 @@ impl PianoPedals {
     pub fn set_height(&mut self, height: f64) -> &mut Self {
         self.height = height;
         if let Some(items) = self.items.borrow_mut().as_mut() {
-            items.scale_to_at(ScaleHint::PorportionalY(height), AabbPoint(DVec3::Y));
+            items
+                .shift(-self.origin)
+                .scale_to(ScaleHint::PorportionalY(height))
+                .shift(self.origin);
         }
         self
     }
@@ -104,7 +107,7 @@ impl Aabb for PianoPedals {
     }
 }
 
-impl Shift for PianoPedals {
+impl ShiftTransform for PianoPedals {
     fn shift(&mut self, offset: DVec3) -> &mut Self {
         self.origin += offset;
         if let Some(items) = self.items.borrow_mut().as_mut() {

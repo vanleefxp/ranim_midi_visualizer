@@ -10,10 +10,11 @@ edition = "2024"
 ranim = { workspace = true }
 ranim-macros = { workspace = true }
 midly = "0.5.3"
-serde = { version = "1.0.228", optional = true }
-itoa = "1.0.17"
+serde = { version = "1.0.228", optional = true, features = ["serde_derive"] }
 malachite-base = "0.9.1"
 itertools = "0.14.0"
+glam = "0.30.10"
+color = "0.3.2"
 
 [dependencies.derive_more]
 version = "2.1.1"
@@ -24,4 +25,4 @@ git = "https://github.com/vanleefxp/interavl_fork.git"
 features = ["serde", "closest"]
 
 [features]
-serde = ["dep:serde"]
+serde = ["dep:serde", "glam/serde", "color/serde"]

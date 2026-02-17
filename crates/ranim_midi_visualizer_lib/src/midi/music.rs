@@ -1,7 +1,11 @@
-use std::{collections::{BTreeSet, HashMap}, ops::Range};
+use std::{
+    collections::{BTreeSet, HashMap},
+    ops::Range,
+};
 
 use crate::midi::{
-    MidiNoteInstant, MultiTrackLoc, MultiTrackMidiNote, MultiTrackMidiNoteInstant, MultiTrackPedalInstant, PedalInstant, PedalType, note::MidiNote, track::MidiTrack
+    MidiNoteInstant, MultiTrackLoc, MultiTrackMidiNote, MultiTrackMidiNoteInstant,
+    MultiTrackPedalInstant, PedalInstant, PedalType, note::MidiNote, track::MidiTrack,
 };
 use derive_more::{Deref, DerefMut, Index, IndexMut, IntoIterator};
 use interavl::IntervalTree;
@@ -133,56 +137,82 @@ impl TryFrom<&[u8]> for MidiMusic {
 
 impl MidiMusic {
     pub fn instants(&self) -> impl Iterator<Item = MultiTrackMidiNoteInstant> {
-        self.tracks.iter()
-        .enumerate()
-        .map(|(idx, track)| track.instants().into_iter().map(move |instant| (idx, instant)))
-        .kmerge_by(|(_, a), (_, b)| a.time < b.time)
-        .map(|(idx, instant)| {
-            let MidiNoteInstant {
-                time,
-                loc: channel,
-                key,
-                vel,
-            } = instant;
-            let loc = MultiTrackLoc { track: idx, channel };
-            MultiTrackMidiNoteInstant { time, loc, key, vel }
-        })
+        self.tracks
+            .iter()
+            .enumerate()
+            .map(|(idx, track)| {
+                track
+                    .instants()
+                    .into_iter()
+                    .map(move |instant| (idx, instant))
+            })
+            .kmerge_by(|(_, a), (_, b)| a.time < b.time)
+            .map(|(idx, instant)| {
+                let MidiNoteInstant {
+                    time,
+                    loc: channel,
+                    key,
+                    vel,
+                } = instant;
+                let loc = MultiTrackLoc {
+                    track: idx,
+                    channel,
+                };
+                MultiTrackMidiNoteInstant {
+                    time,
+                    loc,
+                    key,
+                    vel,
+                }
+            })
     }
 
     pub fn notes(&self) -> impl Iterator<Item = (Range<u64>, MultiTrackMidiNote)> {
-        self.tracks.iter()
-        .enumerate()
-        .map(|(idx, track)| track.notes.iter().map(move |v| (idx, v)))
-        .kmerge_by(|(_, a), (_, b)| a.range().start < b.range().start)
-        .map(|(idx, v)| {
-            let range = v.range().clone();
-            let &MidiNote { loc: channel, key, vel } = v.value();
-            let loc = MultiTrackLoc { track: idx, channel };
-            let note = MultiTrackMidiNote { loc, key, vel };
-            (range, note)
-        })
+        self.tracks
+            .iter()
+            .enumerate()
+            .map(|(idx, track)| track.notes.iter().map(move |v| (idx, v)))
+            .kmerge_by(|(_, a), (_, b)| a.range().start < b.range().start)
+            .map(|(idx, v)| {
+                let range = v.range().clone();
+                let &MidiNote {
+                    loc: channel,
+                    key,
+                    vel,
+                } = v.value();
+                let loc = MultiTrackLoc {
+                    track: idx,
+                    channel,
+                };
+                let note = MultiTrackMidiNote { loc, key, vel };
+                (range, note)
+            })
     }
 
     pub fn pedals(&self) -> impl Iterator<Item = MultiTrackPedalInstant> {
-        self.tracks.iter()
-        .enumerate()
-        .map(|(idx, track)| track.pedals.iter().map(move |instant| (idx, instant)))
-        .kmerge_by(|(_, a), (_, b)| a.time < b.time)
-        .map(|(idx, instant)| {
-            let &PedalInstant {
-                time,
-                loc: channel,
-                pedal_type,
-                value,
-            } = instant;
-            let loc = MultiTrackLoc { track: idx, channel };
-            MultiTrackPedalInstant {
-                time,
-                loc,
-                pedal_type,
-                value,
-            }
-        })
+        self.tracks
+            .iter()
+            .enumerate()
+            .map(|(idx, track)| track.pedals.iter().map(move |instant| (idx, instant)))
+            .kmerge_by(|(_, a), (_, b)| a.time < b.time)
+            .map(|(idx, instant)| {
+                let &PedalInstant {
+                    time,
+                    loc: channel,
+                    pedal_type,
+                    value,
+                } = instant;
+                let loc = MultiTrackLoc {
+                    track: idx,
+                    channel,
+                };
+                MultiTrackPedalInstant {
+                    time,
+                    loc,
+                    pedal_type,
+                    value,
+                }
+            })
     }
 
     pub fn snap_pos(&self, time: u64) -> u64 {
@@ -214,11 +244,17 @@ impl MidiMusic {
     }
 
     pub fn nps(&self, time: u64, window: u64) -> f64 {
-        self.tracks.iter().map(|track| track.nps(time, window)).sum()
+        self.tracks
+            .iter()
+            .map(|track| track.nps(time, window))
+            .sum()
     }
 
     pub fn legato_index(&self, time: u64, window: u64) -> f64 {
-        self.tracks.iter().map(|track| track.legato_index(time, window)).sum()
+        self.tracks
+            .iter()
+            .map(|track| track.legato_index(time, window))
+            .sum()
     }
 }
 

@@ -5,15 +5,11 @@ use std::{
     ops::Range,
 };
 
-use crate::stroke_and_fill::StrokeAndFill;
+use glam::{DVec2, DVec3, Vec3Swizzles as _, dvec2, dvec3};
 use ranim::{
+    anims::morph::MorphAnim,
     color::{AlphaColor, Srgb, palettes::manim},
-    core::{
-        Extract,
-        animation::{AnimationCell, Eval},
-        core_item::CoreItem,
-    },
-    glam::{DVec2, DVec3, Vec3Swizzles as _, dvec2, dvec3},
+    core::{Extract, core_item::CoreItem, timeline::Timeline},
     items::vitem::{
         VItem,
         geometry::{Rectangle, anchor::Origin},
@@ -22,10 +18,8 @@ use ranim::{
     utils::{bezier::PathBuilder, rate_functions::linear},
 };
 
-use crate::anim::MidiNoteAnim;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
-// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct PianoKeyboardSize {
     pub white_size: DVec2,
@@ -95,7 +89,7 @@ impl Aabb for PianoKeyboard {
     }
 }
 
-impl Shift for PianoKeyboard {
+impl ShiftTransform for PianoKeyboard {
     fn shift(&mut self, shift: DVec3) -> &mut Self {
         self.origin.shift(shift);
         if let Some(keys) = self.keys.borrow_mut().as_mut() {
@@ -190,31 +184,69 @@ impl PianoKeyboard {
 
     pub fn anim_note(
         &self,
+        tl: &mut Timeline,
+        note_setup: impl Fn(&mut Rectangle),
         tone: u8,
         duration: f64,
         scroll_speed: f64,
         // note_height: f64,
         scroll_height: f64,
-        stroke_and_fill: StrokeAndFill,
-    ) -> AnimationCell<Rectangle> {
+    ) {
         let (key_width, h_scale) = match tone % 12 {
             1 | 3 | 6 | 8 | 10 => (self.size.black_size.x, self.size.note_h_scale.1),
             _ => (self.size.white_size.x, self.size.note_h_scale.0),
         };
-        let origin = self.key_origin(tone) + dvec3((1. - h_scale) * key_width * 0.5, 0., 0.);
+        let origin = self.key_origin(tone) + ((1. - h_scale) * key_width * 0.5) * DVec3::X;
+        let top_left = origin + DVec3::Y * scroll_height;
         let note_width = key_width * h_scale;
         let note_height = scroll_speed * duration;
         let scroll_time = scroll_height / scroll_speed;
 
-        MidiNoteAnim {
-            origin,
-            scroll_size: dvec2(note_width, scroll_height),
-            note_height,
-            stroke_and_fill,
+        // starts from nothing
+        let mut note =
+            Rectangle::from_min_size(top_left, dvec2(note_width, 0.)).with(|item| note_setup(item));
+        if note_height > scroll_height {
+            // fills the scroll height
+            let note2 = Rectangle::from_min_size(origin, dvec2(note_width, scroll_height))
+                .with(|item| note_setup(item));
+            // ends at nothing
+            let note3 = Rectangle::from_min_size(origin, dvec2(note_width, 0.))
+                .with(|item| note_setup(item));
+            tl.play(
+                note.morph_to(note2)
+                    .with_duration(scroll_time)
+                    .with_rate_func(linear),
+            )
+            .forward(duration - scroll_time)
+            .play(
+                note.morph_to(note3)
+                    .with_duration(scroll_time)
+                    .with_rate_func(linear),
+            );
+        } else {
+            let note2_bottom_left = origin + DVec3::Y * (scroll_height - note_height);
+            let note_size = dvec2(note_width, note_height);
+            let note2 = Rectangle::from_min_size(note2_bottom_left, note_size)
+                .with(|item| note_setup(item));
+            let note3 = Rectangle::from_min_size(origin, note_size).with(|item| note_setup(item));
+            let note4 = Rectangle::from_min_size(origin, dvec2(note_width, 0.))
+                .with(|item| note_setup(item));
+            tl.play(
+                note.morph_to(note2)
+                    .with_duration(duration)
+                    .with_rate_func(linear),
+            )
+            .play(
+                note.morph_to(note3)
+                    .with_duration(scroll_time - duration)
+                    .with_rate_func(linear),
+            )
+            .play(
+                note.morph_to(note4)
+                    .with_duration(duration)
+                    .with_rate_func(linear),
+            );
         }
-        .into_animation_cell()
-        .with_duration(duration + scroll_time)
-        .with_rate_func(linear)
     }
 
     fn generate_keys(&self) -> Vec<VItem> {
@@ -335,15 +367,19 @@ impl PianoKeyboard {
         cfg.corner_size *= scale.xy();
         self
     }
+
+    fn transform_items(&self, transformation: impl FnOnce(&mut Vec<VItem>)) {
+        if let Some(keys) = self.keys.borrow_mut().as_mut() {
+            transformation(keys)
+        }
+    }
 }
 
-impl Scale for PianoKeyboard {
-    fn scale_at_point(&mut self, scale: DVec3, point: DVec3) -> &mut Self {
+impl ScaleTransform for PianoKeyboard {
+    fn scale(&mut self, scale: DVec3) -> &mut Self {
         self.scale_size(scale);
-        self.origin.scale_at_point(scale, point);
-        if let Some(keys) = self.keys.borrow_mut().as_mut() {
-            keys.scale_at_point(scale, point);
-        }
+        self.origin.scale(scale);
+        self.transform_items(|item| item.scale(scale).discard());
         self
     }
 }
