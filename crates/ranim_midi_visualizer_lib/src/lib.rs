@@ -138,8 +138,8 @@ impl Eval<TextItem> for TimerTextAnim {
 
         let time = alpha * duration;
         let nano = (time * 1e9) as u64;
-        let (nano, sec) = (nano % 1000000000, nano / 1000000000);
-        let micro = nano % 1000;
+        let (nano, sec) = (nano % 1_000_000_000, nano / 1_000_000_000);
+        let micro = nano / 1_000_000;
         let (sec, min) = (sec % 60, sec / 60);
         let (min, hour) = (min % 60, min / 60);
         let hour = hour % 100;
