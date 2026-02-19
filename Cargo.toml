@@ -1,6 +1,6 @@
 [package]
 name = "ranim_midi_visualizer"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["F.X.P. <litran39@hotmail.com>"]
 description = "A MIDI visualizer that renders the notes of a MIDI file as a scrolling video. Powered by Rust and `ranim` library."
@@ -8,6 +8,7 @@ license = "MIT"
 
 [dependencies]
 ranim = { workspace = true }
+ranim-app = { workspace = true }
 anyhow = "1.0.101"
 itertools = "0.14.0"
 tracing = "0.1.44"
@@ -25,12 +26,15 @@ features = ["cargo"]
 path = "crates/ranim_midi_visualizer_lib"
 features = ["serde"]
 
+[workspace.dependencies.ranim-app]
+git = "https://github.com/AzurIce/ranim.git"
+# git = "https://github.com/vanleefxp/ranim_fork.git"
+
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
-branch = "main"
-features = ["render", "preview"]
-
+# git = "https://github.com/vanleefxp/ranim_fork.git"
+features = ["render"]
 
 [workspace.dependencies.ranim-macros]
 git = "https://github.com/AzurIce/ranim.git"
-branch = "main"
+# git = "https://github.com/vanleefxp/ranim_fork.git"

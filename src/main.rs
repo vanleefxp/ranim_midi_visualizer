@@ -5,11 +5,8 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::{Ok, Result, anyhow, bail};
 use clap::{ArgMatches, Command, arg, command};
 use phf::phf_map;
-use ranim::{
-    Output, OutputFormat, SceneConfig,
-    cmd::preview::{RanimApp, run_app},
-    color::try_color,
-};
+use ranim::{Output, OutputFormat, RanimScene, SceneConfig, color::try_color};
+use ranim_app::RanimApp;
 use ranim_midi_visualizer_lib::{
     ColorBy, MidiVisualizerConfig, midi::MidiMusic, midi_visualizer_scene, render_midi_visualizer,
 };
@@ -172,7 +169,6 @@ fn get_video_format(matches: &ArgMatches) -> Result<OutputFormat> {
 }
 
 fn get_buf_time(matches: &ArgMatches) -> Result<[f64; 2]> {
-
     let mut buf_time = [0., 0.];
     let mut args = matches.get_many::<String>("buf_time").unwrap();
     if args.len() == 1 {
@@ -224,12 +220,12 @@ fn preview(matches: &ArgMatches) -> Result<()> {
     let visualizer_config = get_visualizer_config(matches)?;
     let music = Arc::new(music);
     let video_size = get_video_size(matches)?;
-    let constructor = |r: &mut ranim::RanimScene| {
+    let constructor = |r: &mut RanimScene| {
         midi_visualizer_scene(r, music.clone(), &visualizer_config, video_size);
     };
     let mut app = RanimApp::new(constructor, name);
     let clear_color = matches.get_one::<String>("clear_color").unwrap().clone();
     app.set_clear_color_str(&clear_color);
-    run_app(app);
+    ranim_app::run_app(app);
     Ok(())
 }
