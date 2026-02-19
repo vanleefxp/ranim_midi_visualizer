@@ -258,7 +258,7 @@ pub fn midi_visualizer_scene(
         });
 
         tl.play(create_timer_text(0.).show())
-            .forward_to(buf_time[0] + scroll_height)
+            .forward_to(buf_time[0] + scroll_time)
             .play(
                 timer_anim
                     .into_animation_cell()
