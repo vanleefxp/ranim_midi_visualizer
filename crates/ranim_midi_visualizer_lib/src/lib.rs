@@ -308,32 +308,40 @@ pub fn midi_visualizer_scene(
         // track instants where the start of notes enter or exit the time window
         // this is more efficnet than creating an animation that updates the NPS value every frame
         // because NPS only changes in these tracked instants
-        let mut nps_changes = song
-            .notes()
-            .map(|(range, _)| (range.start, true))
-            .collect::<BTreeMap<u64, bool>>();
-        nps_changes.extend(
-            song.notes()
-                .map(|(range, _)| (range.start + time_window_nano, false)),
-        );
+        //
+        let mut nps_changes: BTreeMap<u64, isize> = BTreeMap::new();
+        for (range, _) in song.notes() {
+            let enter_time = range.start;
+            let exit_time = range.start + time_window_nano;
+            nps_changes
+                .entry(enter_time)
+                .and_modify(|cnt| *cnt += 1)
+                .or_insert(1);
+            nps_changes
+                .entry(exit_time)
+                .and_modify(|cnt| *cnt -= 1)
+                .or_insert(-1);
+        }
 
         let mut n_notes_in_window = 0usize;
         let mut n_notes_in_window_max = 0usize;
         let mut i_nps_text = create_nps_text(0., 0.);
         tl.play(i_nps_text.show());
 
-        for (time, is_add) in nps_changes {
+        for (time, n_enter) in nps_changes {
             // update the note count in the time window
-            // as all notes must first enter and then exit the time window
-            // the count should be non-negative
-            if is_add {
-                n_notes_in_window += 1;
+            if n_enter > 0 {
+                n_notes_in_window += n_enter as usize;
                 // maximum only increases when a note enters the window
                 if n_notes_in_window > n_notes_in_window_max {
                     n_notes_in_window_max = n_notes_in_window;
                 }
             } else {
-                n_notes_in_window -= 1;
+                // as all notes must first enter and then exit the time window
+                // the count should be at least 1 at this point
+                let n_exit = (-n_enter) as usize;
+                assert!(n_notes_in_window >= n_exit);
+                n_notes_in_window -= n_exit;
             }
             let t = time as f64 / 1e9 + buf_time[0] + scroll_time;
             let nps = n_notes_in_window as f64 / time_window;
@@ -342,6 +350,7 @@ pub fn midi_visualizer_scene(
             i_nps_text = create_nps_text(nps, nps_max);
             tl.play(i_nps_text.show());
         }
+        assert_eq!(n_notes_in_window, 0);
     });
 
     // Legato Index
@@ -389,10 +398,10 @@ pub fn midi_visualizer_scene(
                     // Case 2: the note is shorter than the time window
                     //
                     //                  ========                      window
-                    //                          ----                  t = start             legato = 0
-                    //                      ----                      t = end               legato = duration / window
-                    //                  ----                          t = start + window    legato = duration / window
-                    //              ----                              t = end + window      legato = 0
+                    //                          -----                 t = start             legato = 0
+                    //                     -----                      t = end               legato = duration / window
+                    //                  -----                         t = start + window    legato = duration / window
+                    //             -----                              t = end + window      legato = 0
                     //
                     let max_value = duration as f64 / time_window_nano as f64;
                     [

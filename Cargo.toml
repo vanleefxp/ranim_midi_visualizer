@@ -26,15 +26,21 @@ features = ["cargo"]
 path = "crates/ranim_midi_visualizer_lib"
 features = ["serde"]
 
+[workspace]
+members = ["crates/ranim_path_bool"]
+
 [workspace.dependencies.ranim-app]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
+branch = "feat/merged-gpu-buffer"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
+branch = "feat/merged-gpu-buffer"
 features = ["render"]
 
 [workspace.dependencies.ranim-macros]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
+branch = "feat/merged-gpu-buffer"

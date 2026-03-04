@@ -50,6 +50,7 @@ pub struct PianoKeyboard {
     size: PianoKeyboardSize,
     key_range: Range<u8>,
     highlighted_keys: HashMap<u8, AlphaColor<Srgb>>,
+    opacity: f32,
     keys: RefCell<Option<Vec<VItem>>>,
 }
 
@@ -78,6 +79,7 @@ impl Default for PianoKeyboard {
             size: Default::default(),
             key_range: 21..109, // standard piano keyboard
             highlighted_keys: Default::default(),
+            opacity: 1.,
             keys: Default::default(),
         }
     }
@@ -260,14 +262,15 @@ impl PianoKeyboard {
             black_offset,
             ..
         } = self.size;
+        let opacity = self.opacity;
 
         let i_white_key = piano_key(white_size, corner_size).with(|item| {
-            item.set_fill_color(manim::WHITE)
+            item.set_fill_color(AlphaColor::WHITE.with_alpha(opacity))
                 .set_stroke_color(manim::GREY_C)
                 .set_stroke_width(0.005);
         });
         let i_black_key = piano_key(black_size, corner_size).with(|item| {
-            item.set_fill_color(manim::BLACK)
+            item.set_fill_color(AlphaColor::BLACK.with_alpha(opacity))
                 .set_stroke_color(manim::GREY_C)
                 .set_stroke_width(0.005);
         });
