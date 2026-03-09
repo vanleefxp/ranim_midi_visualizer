@@ -1,16 +1,18 @@
-#![feature(iter_next_chunk, iterator_try_collect)]
-
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Ok, Result, anyhow, bail};
 use clap::{ArgMatches, Command, arg, command};
 use phf::phf_map;
-use ranim::{Output, OutputFormat, RanimScene, SceneConfig, color::try_color};
-use ranim_app::RanimApp;
-use ranim_midi_visualizer_lib::{
-    ColorBy, MidiVisualizerConfig, midi::MidiMusic, midi_visualizer_scene, render_midi_visualizer,
+use ranim::{
+    cmd::preview::{RanimPreviewApp, run_app},
+    {Output, OutputFormat, RanimScene, SceneConfig, color::try_color},
 };
 use uncased::{AsUncased, UncasedStr};
+
+use ranim_midi_visualizer_lib::{
+    ColorBy, MidiVisualizerConfig, midi_visualizer_scene, render_midi_visualizer,
+};
+use structured_midi::MidiMusic;
 
 static VIDEO_SIZES: phf::Map<&UncasedStr, (u32, u32)> = phf_map! {
     UncasedStr::new("8k") | UncasedStr::new("4320p") => (7680, 4320),
@@ -82,7 +84,9 @@ fn main() -> Result<()> {
     let mut cmd_preview = Command::new("preview");
     cmd_preview = add_common_args(cmd_preview);
 
-    let cmd = command!().subcommand(cmd_render).subcommand(cmd_preview);
+    let cmd = command!()
+        .subcommand(cmd_render)
+        .subcommand(cmd_preview);
 
     match cmd.get_matches().subcommand() {
         Some(("render", matches)) => render(matches),
@@ -191,6 +195,7 @@ fn render(matches: &ArgMatches) -> Result<()> {
     let format = get_video_format(matches)?;
 
     let output = Output {
+        name: None,
         fps: matches.get_one::<String>("fps").unwrap().parse()?,
         dir: ".".to_string(),
         width,
@@ -206,7 +211,7 @@ fn render(matches: &ArgMatches) -> Result<()> {
 
     render_midi_visualizer(
         Arc::new(music),
-        name,
+        name.as_str(),
         &visualizer_config,
         &scene_config,
         &output,
@@ -223,9 +228,9 @@ fn preview(matches: &ArgMatches) -> Result<()> {
     let constructor = |r: &mut RanimScene| {
         midi_visualizer_scene(r, music.clone(), &visualizer_config, video_size);
     };
-    let mut app = RanimApp::new(constructor, name);
+    let mut app = RanimPreviewApp::new(constructor, name);
     let clear_color = matches.get_one::<String>("clear_color").unwrap().clone();
     app.set_clear_color_str(&clear_color);
-    ranim_app::run_app(app);
+    run_app(app);
     Ok(())
 }

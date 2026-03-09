@@ -5,7 +5,7 @@ use std::{
 
 use interavl::{IntervalTree, Node};
 
-use crate::midi::GenericPedalInstant;
+use crate::GenericPedalInstant;
 
 use super::instant::GenericMidiNoteInstant;
 use super::loc::Channel;

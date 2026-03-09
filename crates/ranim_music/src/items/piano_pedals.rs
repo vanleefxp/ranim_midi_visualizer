@@ -1,5 +1,6 @@
 use std::cell::{Ref, RefCell};
 
+use int_enum::IntEnum;
 use ranim::{
     color::AlphaColor,
     core::{Extract, core_item::CoreItem},
@@ -8,9 +9,17 @@ use ranim::{
     prelude::*,
 };
 
-use crate::midi::PedalType;
+#[repr(u8)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, IntEnum)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum Pedal {
+    Soft = 0,
+    Sostenuto = 1,
+    #[default]
+    Sustain = 2,
+}
 
-const PEDAL_SVG_SRC: &str = include_str!("../assets/pedals.svg");
+const PEDAL_SVG_SRC: &str = include_str!("assets/pedals.svg");
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PianoPedals {
@@ -64,7 +73,7 @@ impl PianoPedals {
         }
     }
 
-    pub fn set_pedal_status(&mut self, pedal: PedalType, status: u8) -> &mut Self {
+    pub fn set_pedal_status(&mut self, pedal: Pedal, status: u8) -> &mut Self {
         self.status[pedal as usize] = status;
         self.set_item_opacity();
         self

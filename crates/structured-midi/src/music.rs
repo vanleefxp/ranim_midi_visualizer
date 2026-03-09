@@ -3,7 +3,7 @@ use std::{
     ops::Range,
 };
 
-use crate::midi::{
+use crate::{
     MidiNoteInstant, MultiTrackLoc, MultiTrackMidiNote, MultiTrackMidiNoteInstant,
     MultiTrackPedalInstant, PedalInstant, PedalType, note::MidiNote, track::MidiTrack,
 };

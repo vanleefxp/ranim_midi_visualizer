@@ -1,3 +1,5 @@
+#![feature(range_into_bounds)]
+
 mod instant;
 mod loc;
 mod music;

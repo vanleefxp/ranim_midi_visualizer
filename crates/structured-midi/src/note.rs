@@ -2,7 +2,6 @@ use super::loc::{Channel, MultiTrackLoc};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[non_exhaustive]
 pub struct GenericMidiNote<L> {
     pub loc: L,
     pub key: u8,

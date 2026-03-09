@@ -1,19 +1,18 @@
-#![feature(range_into_bounds, unboxed_closures, fn_traits, trait_alias)]
+#![feature(
+    range_into_bounds,
+    unboxed_closures,
+    fn_traits,
+    trait_alias,
+    iter_map_windows
+)]
 
 pub mod cyc_index;
-pub mod items;
 pub mod linear;
-pub mod midi;
 pub mod stroke_and_fill;
 
 use std::{collections::BTreeMap, ops::Range, sync::Arc};
 
-use crate::{
-    cyc_index::IndexCyc as _,
-    items::{PianoKeyboard, PianoKeyboardSize, PianoPedals},
-    linear::SegmentedLinearFn,
-    midi::{MidiMusic, MultiTrackLoc, MultiTrackMidiNote, MultiTrackPedalInstant},
-};
+use crate::{cyc_index::IndexCyc as _, linear::SegmentedLinearFn};
 use itertools::Itertools as _;
 use ranim::{
     Output, SceneConfig,
@@ -29,6 +28,9 @@ use ranim::{
     prelude::*,
     utils::rate_functions::linear,
 };
+
+use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardSize, PianoPedals};
+use structured_midi::{MidiMusic, MultiTrackLoc, MultiTrackMidiNote, MultiTrackPedalInstant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -177,7 +179,7 @@ pub fn midi_visualizer_scene(
     });
 
     let i_keyboard_tem = PianoKeyboard::default().with(|item| {
-        item.set_size(|size| *size = config.keyboard_size)
+        item.set_size(|size| *size = config.keyboard_size.clone())
             .set_key_range(config.key_range.clone());
 
         let width = item.aabb_size().x;
@@ -538,6 +540,7 @@ pub fn midi_visualizer_scene(
                 time,
                 ..
             } = instant;
+            let pedal_type = Pedal::try_from(pedal_type as u8).expect("should be successful");
             tl.forward_to(time as f64 / 1e9 + buf_time[0] + scroll_time)
                 .play(i_pedals.hide());
             i_pedals = i_pedals.with(|item| {
@@ -550,7 +553,7 @@ pub fn midi_visualizer_scene(
 
 pub fn render_midi_visualizer(
     song: Arc<MidiMusic>,
-    name: String,
+    name: &str,
     visualizer_config: &MidiVisualizerConfig,
     scene_config: &SceneConfig,
     output: &Output,
@@ -560,7 +563,13 @@ pub fn render_midi_visualizer(
     let constructor = |r: &mut RanimScene| {
         midi_visualizer_scene(r, song.clone(), visualizer_config, video_size);
     };
-    render_scene_output(constructor, name, scene_config, output, buffer_count);
+    render_scene_output(
+        constructor,
+        name.to_string(),
+        scene_config,
+        output,
+        buffer_count,
+    );
 }
 
 //////////////////////////////////////////////////

@@ -9,18 +9,18 @@ ranim-macros = { workspace = true }
 midly = "0.5.3"
 serde = { version = "1.0.228", optional = true, features = ["serde_derive"] }
 malachite-base = "0.9.1"
-itertools = "0.14.0"
+itertools = { workspace = true }
 glam = "0.30.10"
 color = "0.3.2"
 ordered-float = "5.1.0"
-
-[dependencies.derive_more]
-version = "2.1.1"
-features = ["deref", "deref_mut", "index", "index_mut", "into_iterator"]
-
-[dependencies.interavl]
-git = "https://github.com/vanleefxp/interavl_fork.git"
-features = ["serde", "closest"]
+ranim_music = { workspace = true }
+structured-midi = { workspace = true }
 
 [features]
-serde = ["dep:serde", "glam/serde", "color/serde"]
+serde = [
+    "dep:serde",
+    "glam/serde",
+    "color/serde",
+    "ranim_music/serde",
+    "structured-midi/serde",
+]

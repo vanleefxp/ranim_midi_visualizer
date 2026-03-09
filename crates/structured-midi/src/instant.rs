@@ -1,3 +1,5 @@
+use int_enum::IntEnum;
+
 use super::loc::{Channel, MultiTrackLoc};
 use std::cmp::Ordering;
 
@@ -120,12 +122,14 @@ impl MidiNoteInstant {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[repr(u8)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, IntEnum)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum PedalType {
-    Soft,
-    Sostenuto,
-    Sustain,
+    Soft = 0,
+    Sostenuto = 1,
+    #[default]
+    Sustain = 2,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]

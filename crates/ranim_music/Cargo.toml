@@ -1,0 +1,17 @@
+[package]
+name = "ranim_music"
+version = "0.1.0"
+edition = "2024"
+authors = ["F.X.P. <litran39@hotmail.com>"]
+license = "MIT"
+description = "Music-related items for Ranim."
+
+[dependencies]
+int-enum = { workspace = true }
+itertools = "0.14.0"
+ranim = { workspace = true }
+ranim-macros = { workspace = true }
+serde = { version = "1.0.228", optional = true }
+
+[features]
+serde = ["dep:serde"]
