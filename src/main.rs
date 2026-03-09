@@ -84,9 +84,7 @@ fn main() -> Result<()> {
     let mut cmd_preview = Command::new("preview");
     cmd_preview = add_common_args(cmd_preview);
 
-    let cmd = command!()
-        .subcommand(cmd_render)
-        .subcommand(cmd_preview);
+    let cmd = command!().subcommand(cmd_render).subcommand(cmd_preview);
 
     match cmd.get_matches().subcommand() {
         Some(("render", matches)) => render(matches),

@@ -8,10 +8,7 @@ midly = "0.5.3"
 serde = { version = "1.0.228", optional = true }
 itertools = { workspace = true }
 int-enum = { workspace = true }
-
-[dependencies.derive_more]
-version = "2.1.1"
-features = ["deref", "deref_mut", "index", "index_mut", "into_iterator"]
+derive_more = { workspace = true }
 
 [dependencies.interavl]
 git = "https://github.com/vanleefxp/interavl_fork.git"

@@ -29,7 +29,7 @@ use ranim::{
     utils::rate_functions::linear,
 };
 
-use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardSize, PianoPedals};
+use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardSize, PianoPedals, is_black_key};
 use structured_midi::{MidiMusic, MultiTrackLoc, MultiTrackMidiNote, MultiTrackPedalInstant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -82,7 +82,7 @@ pub struct MidiVisualizerConfig {
     pub color_by: ColorBy,
     pub buf_time: [f64; 2],
     pub keyboard_size: PianoKeyboardSize,
-    pub key_range: Range<u8>,
+    pub key_range: Range<i8>,
     pub status_bar_config: StatusBarConfig,
     pub progress_bar_config: ProgressBarConfig,
     pub time_window: f64,
@@ -103,7 +103,7 @@ impl Default for MidiVisualizerConfig {
             scroll_speed: 2.,
             buf_time: [2., 2.],
             keyboard_size: Default::default(),
-            key_range: 21..109,
+            key_range: -39..49,
             status_bar_config: Default::default(),
             progress_bar_config: Default::default(),
             time_window: 1.,
@@ -117,12 +117,6 @@ impl Default for MidiVisualizerConfig {
             ])),
         }
     }
-}
-
-macro_rules! key_is_black {
-    ($key:expr) => {
-        matches!($key % 12, 1 | 3 | 6 | 8 | 10)
-    };
 }
 
 pub fn midi_visualizer_scene(
@@ -465,7 +459,7 @@ pub fn midi_visualizer_scene(
             tl.forward_to(instant.time as f64 / 1e9 + buf_time[0] + scroll_time);
             tl.play(i_keyboard.hide());
             i_keyboard = i_keyboard.with(|item| {
-                let key = instant.key();
+                let key = instant.key() as i8 - 60;
 
                 if instant.is_start() {
                     item.highlight_keys(|m| {
@@ -473,7 +467,7 @@ pub fn midi_visualizer_scene(
                         let color = *colors.index_cyc(match color_by {
                             Channel => instant.loc.channel as usize,
                             Track => instant.loc.track,
-                            KeyColor => key_is_black!(key) as usize,
+                            KeyColor => is_black_key(key) as usize,
                         });
                         m.insert(key, color);
                     });
@@ -495,6 +489,7 @@ pub fn midi_visualizer_scene(
             key,
             vel,
         } = note;
+        let key = key as i8 - 60;
 
         let t_start = start as f64 / 1e9 + buf_time[0];
         let duration = (end - start) as f64 / 1e9;
@@ -504,7 +499,7 @@ pub fn midi_visualizer_scene(
             *colors.index_cyc(match color_by {
                 Channel => channel as usize,
                 Track => track,
-                KeyColor => key_is_black!(key) as usize,
+                KeyColor => is_black_key(key) as usize,
             })
         };
 

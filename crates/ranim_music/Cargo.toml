@@ -12,6 +12,7 @@ itertools = "0.14.0"
 ranim = { workspace = true }
 ranim-macros = { workspace = true }
 serde = { version = "1.0.228", optional = true }
+derive_more = { workspace = true }
 
 [features]
 serde = ["dep:serde"]

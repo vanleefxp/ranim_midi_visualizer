@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2024"
 authors = ["F.X.P. <litran39@hotmail.com>"]
 license = "MIT"
-description = "A MIDI visualizer that renders the notes of a MIDI file as a scrolling video. Powered by Rust and `ranim` library."
+description = "A MIDI visualizer that renders MIDI files into scrolling videos. Powered by Rust and Ranim."
 
 [dependencies]
 ranim = { workspace = true, features = ["render", "preview"] }
@@ -50,3 +50,15 @@ features = ["render"]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
 # branch = "feat/merged-gpu-buffer"
+
+[workspace.dependencies.derive_more]
+version = "2.1.1"
+features = [
+    "deref",
+    "deref_mut",
+    "index",
+    "index_mut",
+    "into_iterator",
+    "from",
+    "into",
+]

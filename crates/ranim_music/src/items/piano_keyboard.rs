@@ -6,11 +6,15 @@ use std::{
     slice,
 };
 
+use derive_more::{Deref, DerefMut, From, Into};
 use itertools::izip;
 use ranim::{
     anims::morph::MorphAnim,
     color::{AlphaColor, Srgb, palettes::manim},
-    core::{Extract, components::width::Width, core_item::CoreItem, timeline::Timeline},
+    core::{
+        Extract, components::width::Width, core_item::CoreItem, num::Integer as _,
+        timeline::Timeline,
+    },
     glam::{DVec2, DVec3, Vec3Swizzles as _, dvec2},
     items::vitem::{
         VItem,
@@ -34,8 +38,8 @@ fn is_black_key_otone(otone: u8) -> bool {
 }
 
 #[inline(always)]
-fn is_black_key(key: u8) -> bool {
-    is_black_key_otone(key % 12)
+pub fn is_black_key(key: i8) -> bool {
+    is_black_key_otone(key.mod_floor(&12) as u8)
 }
 
 /// Size details of piano keyboard keys.
@@ -62,7 +66,7 @@ pub struct PianoKeyboardSize {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PianoKeyboardColor {
     /// Fill color of black and white keys.
-    key_colors: (AlphaColor<Srgb>, AlphaColor<Srgb>),
+    key_color: (AlphaColor<Srgb>, AlphaColor<Srgb>),
     /// Stroke color of keys.
     stroke_color: AlphaColor<Srgb>,
 }
@@ -77,9 +81,9 @@ pub struct PianoKeyboard {
     /// Color details of keys.
     color: PianoKeyboardColor,
     /// Range of keys to display.
-    key_range: Range<u8>,
+    key_range: Range<i8>,
     /// Keys marked with special colors.
-    highlighted_keys: HashMap<u8, AlphaColor<Srgb>>,
+    highlighted_keys: HashMap<i8, AlphaColor<Srgb>>,
     /// Stroke width of keys.
     stroke_width: Width,
     /// Cached keys, generated on-demand.
@@ -92,11 +96,15 @@ impl Locate<PianoKeyboard> for Origin {
     }
 }
 
-impl Locate<PianoKeyboard> for u8 {
+#[derive(Clone, Debug, Copy, Default, Deref, DerefMut, From, Into)]
+pub struct Tone(pub i8);
+
+impl Locate<PianoKeyboard> for Tone {
     fn locate(&self, target: &PianoKeyboard) -> DVec3 {
         const WHITE_WIDTH_DISP: [u8; 12] = [0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6];
 
-        let (octave, otone) = (self / 12, self % 12);
+        let (octave, otone) = self.0.div_mod_floor(&12);
+        let otone = otone as u8;
 
         let black_width = target.size.black_size.x;
         let white_width = target.size.white_size.x;
@@ -110,7 +118,7 @@ impl Locate<PianoKeyboard> for u8 {
             disp += black_width * (black_offset[black_idx as usize] - 1.) / 2.
         }
 
-        target.origin + (disp + (octave as f64 - 5.) * white_width * 7.) * DVec3::X
+        target.origin + (disp + octave as f64 * white_width * 7.) * DVec3::X
     }
 }
 
@@ -129,7 +137,7 @@ impl Default for PianoKeyboardSize {
 impl Default for PianoKeyboardColor {
     fn default() -> Self {
         Self {
-            key_colors: (AlphaColor::WHITE, AlphaColor::BLACK),
+            key_color: (AlphaColor::WHITE, AlphaColor::BLACK),
             stroke_color: manim::GREY_C,
         }
     }
@@ -140,7 +148,7 @@ impl Default for PianoKeyboard {
         Self {
             origin: DVec3::ZERO,
             size: Default::default(),
-            key_range: 21..109, // standard piano keyboard, 88 key
+            key_range: -39..49, // standard piano keyboard, 88 key
             highlighted_keys: Default::default(),
             color: Default::default(),
             keys: Default::default(),
@@ -164,7 +172,7 @@ impl ShiftTransform for PianoKeyboard {
 }
 
 impl PianoKeyboard {
-    pub fn new(key_range: &Range<u8>) -> Self {
+    pub fn new(key_range: &Range<i8>) -> Self {
         Self {
             key_range: key_range.clone(),
             ..Default::default()
@@ -184,7 +192,7 @@ impl PianoKeyboard {
         self
     }
 
-    pub fn set_key_range(&mut self, key_range: Range<u8>) -> &mut Self {
+    pub fn set_key_range(&mut self, key_range: Range<i8>) -> &mut Self {
         let orig_range = self.key_range.clone();
         self.key_range = key_range.clone();
         if self.key_range != orig_range {
@@ -193,13 +201,13 @@ impl PianoKeyboard {
         self
     }
 
-    pub fn highlighted_keys(&self) -> &HashMap<u8, AlphaColor<Srgb>> {
+    pub fn highlighted_keys(&self) -> &HashMap<i8, AlphaColor<Srgb>> {
         &self.highlighted_keys
     }
 
     pub fn highlight_keys(
         &mut self,
-        f: impl FnOnce(&mut HashMap<u8, AlphaColor<Srgb>>),
+        f: impl FnOnce(&mut HashMap<i8, AlphaColor<Srgb>>),
     ) -> &mut Self {
         let orig_keys = self.highlighted_keys.clone();
         f(&mut self.highlighted_keys);
@@ -224,7 +232,7 @@ impl PianoKeyboard {
         &self,
         tl: &mut Timeline,
         note_setup: impl Fn(&mut Rectangle),
-        tone: u8,
+        tone: i8,
         duration: f64,
         scroll_speed: f64,
         scroll_height: f64,
@@ -234,7 +242,7 @@ impl PianoKeyboard {
         } else {
             (self.size.white_size.x, self.size.note_h_scale.0)
         };
-        let origin = tone.locate(self) + ((1. - h_scale) * key_width * 0.5) * DVec3::X;
+        let origin = Tone(tone).locate(self) + ((1. - h_scale) * key_width * 0.5) * DVec3::X;
         let top_left = origin + DVec3::Y * scroll_height;
         let note_width = key_width * h_scale;
         let note_height = scroll_speed * duration;
@@ -302,7 +310,7 @@ impl PianoKeyboard {
                 },
             color:
                 PianoKeyboardColor {
-                    key_colors: (white_color, black_color),
+                    key_color: (white_color, black_color),
                     stroke_color,
                 },
             key_range:
@@ -372,10 +380,11 @@ impl PianoKeyboard {
 
         let mut keys = Vec::with_capacity(self.key_range.len());
         if o_end < o_start {
+            // Start and end are inside the same octave.
+
             if tone_end > tone_start {
-                // Start and end are inside the same octave.
-                let otone_start = tone_start - o_end * 12;
-                let otone_end = tone_end - o_end * 12;
+                let otone_start = (tone_start - o_end * 12) as u8;
+                let otone_end = (tone_end - o_end * 12) as u8;
 
                 // First white key has no cutoff on the left side.
                 let idx = otone_start as usize;
@@ -386,7 +395,7 @@ impl PianoKeyboard {
                     create_white_key(idx, [0., white_key_cutoff[idx][1]])
                 };
                 keys.push(first_key.with(|item| {
-                    item.shift((o_end as f64 - 6.) * 7. * white_size.x * u + origin)
+                    item.shift((o_end as f64 - 1.) * 7. * white_size.x * u + origin)
                         .discard()
                 }));
 
@@ -394,7 +403,7 @@ impl PianoKeyboard {
                     // Other keys in the middle.
                     for i in (otone_start + 1)..(otone_end - 1) {
                         keys.push(i_octave[i as usize].clone().with(|item| {
-                            item.shift((o_end as f64 - 5.) * 7. * white_size.x * u + origin)
+                            item.shift(o_end as f64 * 7. * white_size.x * u + origin)
                                 .discard()
                         }));
                     }
@@ -408,7 +417,7 @@ impl PianoKeyboard {
                         create_white_key(idx, [white_key_cutoff[idx][0], 0.])
                     };
                     keys.push(last_key.with(|item| {
-                        item.shift((o_end as f64 - 5.) * 7. * white_size.x * u + origin)
+                        item.shift(o_end as f64 * 7. * white_size.x * u + origin)
                             .discard()
                     }));
                 }
@@ -417,7 +426,7 @@ impl PianoKeyboard {
             // Crosses multiple octaves.
 
             // First white key has no cutoff on the left side.
-            let otone_start = tone_start - (o_start - 1) * 12;
+            let otone_start = (tone_start - (o_start - 1) * 12) as u8;
             let idx = otone_start as usize;
             let first_key = if is_black_key_otone(otone_start) {
                 i_octave[idx].clone()
@@ -426,14 +435,14 @@ impl PianoKeyboard {
                 create_white_key(idx, [0., white_key_cutoff[idx][1]])
             };
             keys.push(first_key.with(|item| {
-                item.shift((o_start as f64 - 6.) * 7. * white_size.x * u + origin)
+                item.shift((o_start as f64 - 1.) * 7. * white_size.x * u + origin)
                     .discard()
             }));
 
             // Other keys in the first octave.
             for i in (otone_start + 1)..12 {
                 keys.push(i_octave[i as usize].clone().with(|item| {
-                    item.shift((o_start as f64 - 6.) * 7. * white_size.x * u + origin)
+                    item.shift((o_start as f64 - 1.) * 7. * white_size.x * u + origin)
                         .discard()
                 }));
             }
@@ -441,20 +450,20 @@ impl PianoKeyboard {
             // Complete octaves in the middle.
             for o in o_start..o_end {
                 keys.extend(i_octave.clone().with(|item| {
-                    item.shift((o as f64 - 5.) * 7. * white_size.x * u + origin)
+                    item.shift(o as f64 * 7. * white_size.x * u + origin)
                         .discard()
                 }));
             }
 
             // Other keys in the last octave.
-            let otone_end = tone_end - o_end * 12;
+            let otone_end = (tone_end - o_end * 12) as u8;
             // If `otone_end == 0` then the last octave must be empty
             // so no key needs to be created.
             // In this case `otone_end - 1` will cause overflow.
             if otone_end > 0 {
                 for i in 0..(otone_end - 1) {
                     keys.push(i_octave[i as usize].clone().with(|item| {
-                        item.shift((o_end as f64 - 5.) * 7. * white_size.x * u + origin)
+                        item.shift(o_end as f64 * 7. * white_size.x * u + origin)
                             .discard()
                     }));
                 }
@@ -468,7 +477,7 @@ impl PianoKeyboard {
                     create_white_key(idx, [white_key_cutoff[idx][0], 0.])
                 };
                 keys.push(last_key.with(|item| {
-                    item.shift((o_end as f64 - 5.) * 7. * white_size.x * u + origin)
+                    item.shift(o_end as f64 * 7. * white_size.x * u + origin)
                         .discard()
                 }));
             }
@@ -481,7 +490,7 @@ impl PianoKeyboard {
         let &Self {
             color:
                 PianoKeyboardColor {
-                    key_colors: (white_color, black_color),
+                    key_color: (white_color, black_color),
                     ..
                 },
             ..
@@ -633,7 +642,7 @@ fn piano_key_white(
     pb.close_path().vpoints().to_vec()
 }
 
-fn octave_range(key_range: &Range<u8>) -> Range<u8> {
+fn octave_range(key_range: &Range<i8>) -> Range<i8> {
     let &Range {
         start: k_start,
         end: k_end,
@@ -641,12 +650,12 @@ fn octave_range(key_range: &Range<u8>) -> Range<u8> {
 
     // Index of the first complete octave in the key range
     let o_start = if k_start % 12 == 0 {
-        k_start / 12
+        k_start.div_floor(12)
     } else {
-        (k_start / 12) + 1
+        (k_start.div_floor(12)) + 1
     };
     // Index of the last complete octave in the key range (not inclusive)
-    let o_end = k_end / 12;
+    let o_end = k_end.div_floor(12);
 
     o_start..o_end
 }
