@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 eframe = { workspace = true }
 egui-phosphor = { workspace = true }
+egui_dock = { workspace = true }
 rfd = { workspace = true }
 ranim = { workspace = true }
 ranim_music = { workspace = true }
