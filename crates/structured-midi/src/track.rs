@@ -40,10 +40,11 @@ where
         instants
     }
 
+    // [TODO] make this better
     pub fn notes_between_iter<'a>(
         &'a self,
         time_range: &'a Range<u64>,
-        key_range: &impl RangeBounds<u8>,
+        key_range: &impl RangeBounds<i8>,
     ) -> impl Iterator<Item = &'a Box<Node<u64, GenericMidiNote<L>>>> {
         self.notes
             .iter_overlaps(time_range)

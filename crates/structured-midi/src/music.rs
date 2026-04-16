@@ -1,11 +1,14 @@
 use std::{
-    collections::{BTreeSet, HashMap},
-    ops::Range,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    ops::{Range, RangeBounds},
 };
 
 use crate::{
     MidiNoteInstant, MultiTrackLoc, MultiTrackMidiNote, MultiTrackMidiNoteInstant,
-    MultiTrackPedalInstant, PedalInstant, PedalType, note::MidiNote, track::MidiTrack,
+    MultiTrackPedalInstant, PedalInstant, PedalType,
+    note::MidiNote,
+    track::MidiTrack,
+    utils::func::{LadderFn, SegmentedLinearFn},
 };
 use derive_more::{Deref, DerefMut, Index, IndexMut, IntoIterator};
 use interavl::IntervalTree;
@@ -43,7 +46,7 @@ impl TryFrom<&[u8]> for MidiMusic {
 
             let mut notes = IntervalTree::default();
             let mut pedals = BTreeSet::new();
-            let mut note_states = HashMap::<(u8, u8), (u64, MidiNote)>::with_capacity(10);
+            let mut note_states = HashMap::<(u8, i8), (u64, MidiNote)>::with_capacity(10);
 
             for event in event_iter {
                 let event = event?;
@@ -59,7 +62,7 @@ impl TryFrom<&[u8]> for MidiMusic {
                         let channel = channel.as_int();
                         match message {
                             NoteOn { key, vel } => {
-                                let key = key.as_int();
+                                let key = key.as_int() as i8 - 60;
                                 let vel = vel.as_int();
                                 if let Some((start_time, note)) =
                                     note_states.get_mut(&(channel, key))
@@ -87,7 +90,7 @@ impl TryFrom<&[u8]> for MidiMusic {
                                 }
                             }
                             NoteOff { key, .. } => {
-                                let key = key.as_int();
+                                let key = key.as_int() as i8 - 60;
                                 if let Some((start_time, note)) =
                                     note_states.remove(&(channel, key))
                                 {
@@ -189,6 +192,37 @@ impl MidiMusic {
             })
     }
 
+    // [TODO] make this better
+    pub fn notes_between_iter<'a>(
+        &'a self,
+        time_range: &'a Range<u64>,
+        key_range: &impl RangeBounds<i8>,
+    ) -> impl Iterator<Item = (Range<u64>, MultiTrackMidiNote)> {
+        self.tracks
+            .iter()
+            .enumerate()
+            .map(|(idx, track)| {
+                track
+                    .notes_between_iter(time_range, key_range)
+                    .map(move |v| (idx, v))
+            })
+            .kmerge_by(|(_, a), (_, b)| a.range().start < b.range().start)
+            .map(|(idx, v)| {
+                let range = v.range().clone();
+                let &MidiNote {
+                    loc: channel,
+                    key,
+                    vel,
+                } = v.value();
+                let loc = MultiTrackLoc {
+                    track: idx,
+                    channel,
+                };
+                let note = MultiTrackMidiNote { loc, key, vel };
+                (range, note)
+            })
+    }
+
     pub fn pedals(&self) -> impl Iterator<Item = MultiTrackPedalInstant> {
         self.tracks
             .iter()
@@ -247,14 +281,139 @@ impl MidiMusic {
         self.tracks
             .iter()
             .map(|track| track.nps(time, window))
-            .sum()
+            .sum::<f64>()
+            .copysign(1.) // prevent negative zero
     }
 
+    /// **Legato index** is a measure describing how continuously a series of notes are played.
+    /// This index was put forward by Wiwi Kuan in his Pianometer program.
+    /// See: https://nicechord.com/pianometer/
+    ///
+    /// The calculation of legato index in a certain time window is done as follows:
+    ///
+    /// + take the intersection of the time window and note ranges
+    /// + sum the lengths of the intersecting parts of the notes and the time window
+    /// + divide the sum by the length of the time window
+    ///
     pub fn legato_index(&self, time: u64, window: u64) -> f64 {
         self.tracks
             .iter()
             .map(|track| track.legato_index(time, window))
+            .sum::<f64>()
+            .copysign(1.) // prevent negative zero
+    }
+
+    /// Calculates the legato index of the whole song. The returned result is a callable function.
+    pub fn legato_fn(&self, window: u64) -> SegmentedLinearFn<u64, f64> {
+        // `legato_index` calculate the legato index directly by definition,
+        // However, for the computation of legato index of the whole song, this approach can be optimized given the
+        // observation that the changing of legato index is a segmented linear function to time.
+        //
+        // the legato score function is _additive_, meaning that we can sum the legato score functions of each note
+        // to get the total legato score function of the song.
+        // So the first step is to create the legato score function for each note.
+        self.notes()
+            .map(|(range, _)| {
+                // When it comes to the calculation of single-note legato score function, there are two cases:
+                let Range { start, end } = range;
+                let duration = end - start;
+                SegmentedLinearFn::from_iter(if duration > window {
+                    // Case 1: the note is longer than the time window
+                    //
+                    //                  =========                     window
+                    //                           -----------------    t = start             legato = 0
+                    //                  -----------------             t = start + window    legato = 1
+                    //          -----------------                     t = end               legato = 1
+                    // -----------------                              t = end + window      legato = 0
+                    //
+                    [
+                        (start, 0.),
+                        (start + window, 1.),
+                        (end, 1.),
+                        (end + window, 0.),
+                    ]
+                } else {
+                    // Case 2: the note is shorter than the time window
+                    //
+                    //                  ========                      window
+                    //                          -----                 t = start             legato = 0
+                    //                     -----                      t = end               legato = duration / window
+                    //                  -----                         t = start + window    legato = duration / window
+                    //             -----                              t = end + window      legato = 0
+                    //
+                    let max_value = duration as f64 / window as f64;
+                    [
+                        (start, 0.),
+                        (end, max_value),
+                        (start + duration, max_value),
+                        (end + window, 0.),
+                    ]
+                })
+            })
             .sum()
+    }
+
+    pub fn note_count_iter(&self) -> impl Iterator<Item = (u64, usize)> {
+        self.notes().scan(0usize, |count, (range, _)| {
+            *count += 1;
+            Some((range.start, *count))
+        })
+    }
+
+    pub fn note_count_fn(&self) -> LadderFn<u64, usize> {
+        self.note_count_iter().collect()
+    }
+
+    pub fn nps_iter(&self, window: u64) -> impl Iterator<Item = (u64, f64)> {
+        // instants where the start of notes enter or exit the time window
+        // and how many notes flows in or out at the instant
+        // NPS value only changes at these instants
+        let mut nps_changes: BTreeMap<u64, isize> = BTreeMap::new();
+        for (range, _) in self.notes() {
+            let enter_time = range.start;
+            let exit_time = range.start + window;
+            nps_changes
+                .entry(enter_time)
+                .and_modify(|cnt| *cnt += 1)
+                .or_insert(1);
+            nps_changes
+                .entry(exit_time)
+                .and_modify(|cnt| *cnt -= 1)
+                .or_insert(-1);
+        }
+
+        // accumulate the number of notes in window and divide it by the window length to get NPS values
+        nps_changes
+            .into_iter()
+            .scan(0usize, move |n_in_window, (time, n_enter)| {
+                if n_enter > 0 {
+                    *n_in_window += n_enter as usize;
+                } else {
+                    *n_in_window -= (-n_enter) as usize;
+                }
+                Some((time, *n_in_window as f64 / (window as f64 / 1e9)))
+            })
+    }
+
+    pub fn nps_fn(&self, window: u64) -> LadderFn<u64, f64> {
+        self.nps_iter(window).collect()
+    }
+
+    pub fn nps_max_iter(&self, window: u64) -> impl Iterator<Item = (u64, f64)> {
+        self.nps_iter(window)
+            .scan(0., |nps_max, (time, nps)| {
+                if nps > *nps_max {
+                    *nps_max = nps;
+                    Some(Some((time, nps)))
+                } else {
+                    Some(None)
+                }
+            })
+            .flatten()
+    }
+
+    pub fn nps_max_fn(&self, window: u64) -> LadderFn<u64, f64> {
+        self.nps_max_iter(window).collect()
     }
 }
 

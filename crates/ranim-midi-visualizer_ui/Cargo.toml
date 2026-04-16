@@ -1,0 +1,17 @@
+[package]
+name = "ranim-midi-visualizer_ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = { workspace = true }
+egui-phosphor = { workspace = true }
+rfd = { workspace = true }
+ranim = { workspace = true }
+ranim_music = { workspace = true }
+ranim-midi-visualizer_lib = { workspace = true }
+structured-midi = { workspace = true }
+derive_more = { workspace = true }
+music-utils = { workspace = true }
+i_triangle = { version = "0.41.0", features = ["glam"] }
+ordered-float = { workspace = true }

@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 pub struct GenericMidiNoteInstant<L> {
     pub time: u64,
     pub loc: L,
-    pub key: u8,
+    pub key: i8,
     pub(crate) vel: u8,
 }
 
@@ -19,7 +19,7 @@ pub type MidiNoteInstant = GenericMidiNoteInstant<Channel>;
 pub type MultiTrackMidiNoteInstant = GenericMidiNoteInstant<MultiTrackLoc>;
 
 impl<L> GenericMidiNoteInstant<L> {
-    pub fn new_start(time: u64, loc: L, key: u8, vel: u8) -> Self {
+    pub fn new_start(time: u64, loc: L, key: i8, vel: u8) -> Self {
         assert!(vel & 0x80 == 0);
         GenericMidiNoteInstant {
             time,
@@ -29,7 +29,7 @@ impl<L> GenericMidiNoteInstant<L> {
         }
     }
 
-    pub fn new_end(time: u64, loc: L, key: u8) -> Self {
+    pub fn new_end(time: u64, loc: L, key: i8) -> Self {
         GenericMidiNoteInstant {
             time,
             loc,
@@ -52,7 +52,7 @@ impl<L> GenericMidiNoteInstant<L> {
         self.time
     }
 
-    pub fn key(&self) -> u8 {
+    pub fn key(&self) -> i8 {
         self.key
     }
 

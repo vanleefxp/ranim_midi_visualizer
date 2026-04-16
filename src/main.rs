@@ -4,25 +4,25 @@ use anyhow::{Ok, Result, anyhow, bail};
 use clap::{ArgMatches, Command, arg, command};
 use phf::phf_map;
 use ranim::{
-    cmd::preview::{RanimPreviewApp, run_app},
-    {Output, OutputFormat, RanimScene, SceneConfig, color::try_color},
+    Output, OutputFormat, RanimScene, SceneConfig, cmd::preview::Resolution, color::try_color,
 };
 use uncased::{AsUncased, UncasedStr};
 
+// use preview::{MidiVisualizerApp, run_app};
 use ranim_midi_visualizer_lib::{
     ColorBy, MidiVisualizerConfig, midi_visualizer_scene, render_midi_visualizer,
 };
 use structured_midi::MidiMusic;
 
-static VIDEO_SIZES: phf::Map<&UncasedStr, (u32, u32)> = phf_map! {
-    UncasedStr::new("8k") | UncasedStr::new("4320p") => (7680, 4320),
-    UncasedStr::new("4k") | UncasedStr::new("2160p") => (3840, 2160),
-    UncasedStr::new("2k") => (2048, 1080),
-    UncasedStr::new("1080p") => (1920, 1080),
-    UncasedStr::new("720p") => (1280, 720),
-    UncasedStr::new("480p") => (854, 480),
-    UncasedStr::new("360p") => (640, 360),
-    UncasedStr::new("240p") => (426, 240),
+static VIDEO_SIZES: phf::Map<&UncasedStr, Resolution> = phf_map! {
+    UncasedStr::new("8k") | UncasedStr::new("4320p") => Resolution::new(7680, 4320),
+    UncasedStr::new("4k") | UncasedStr::new("2160p") | UncasedStr::new("uhd") => Resolution::UHD,
+    UncasedStr::new("2k") => Resolution::new(2048, 1080),
+    UncasedStr::new("1080p") | UncasedStr::new("fhd") => Resolution::FHD,
+    UncasedStr::new("720p") | UncasedStr::new("hd") => Resolution::HD,
+    UncasedStr::new("480p") => Resolution::new(854, 480),
+    UncasedStr::new("360p") => Resolution::new(640, 360),
+    UncasedStr::new("240p") => Resolution::new(426, 240),
 };
 static VIDEO_FORMATS: phf::Map<&UncasedStr, OutputFormat> = phf_map! {
     UncasedStr::new("mp4") => OutputFormat::Mp4,
@@ -66,12 +66,12 @@ fn main() -> Result<()> {
     let add_common_args = |cmd: Command| {
         cmd
         .arg(arg!(midi_file:  <INFILE> "Input midi file to render.").required(true))
-        .arg(arg!(-s --size <WIDTH> <HEIGHT> "Output video size.").value_names(["WIDTH", "HEIGHT"]).default_values(["1080p"]).num_args(1..=2))
+        .arg(arg!(-s --size <SIZE> "Output video size.").value_names(["WIDTH", "HEIGHT"]).default_values(["1080p"]).num_args(1..=2))
         .arg(arg!(clear_color: --bg <COLOR> "Background color. In any supported CSS color format.").default_value("#282c34"))
         .arg(arg!(note_colors: --fg <COLOR>).default_values(["#89b9eb", "#9be347", "#f7931e", "#f7c71e"]).num_args(1..))
         .arg(arg!(--color_by <VALUE> "How note colors are assigned to different notes. Supported values are: channel, track, key_color.").default_value("channel"))
         .arg(arg!(--scroll_speed <FLOAT> "Note scroll speed in coordinate units per second. By default the screen height is 8 coordinate units.").default_value("2"))
-        .arg(arg!(--buf_time <BEFORE> <AFTER> "Additional time before and after playing the song.").value_names(["BEFORE", "AFTER"]).default_values(["2", "2"]).num_args(1..=2))
+        .arg(arg!(--buf_time <VALUE> "Additional time before and after playing the song.").value_names(["BEFORE", "AFTER"]).default_values(["2", "2"]).num_args(1..=2))
     };
 
     let mut cmd_render = Command::new("render");
@@ -84,11 +84,17 @@ fn main() -> Result<()> {
     let mut cmd_preview = Command::new("preview");
     cmd_preview = add_common_args(cmd_preview);
 
-    let cmd = command!().subcommand(cmd_render).subcommand(cmd_preview);
+    let cmd_ui = Command::new("ui");
+
+    let cmd = command!()
+        .subcommand(cmd_render)
+        .subcommand(cmd_preview)
+        .subcommand(cmd_ui);
 
     match cmd.get_matches().subcommand() {
         Some(("render", matches)) => render(matches),
         Some(("preview", matches)) => preview(matches),
+        Some(("ui", _)) => Ok(ui()),
         _ => Ok(()),
     }
 }
@@ -145,7 +151,12 @@ fn get_song_and_name(matches: &ArgMatches) -> Result<(MidiMusic, String)> {
     Ok((music, name))
 }
 
-fn get_video_size(matches: &ArgMatches) -> Result<(u32, u32)> {
+fn get_scene_config(matches: &ArgMatches) -> SceneConfig {
+    let clear_color = matches.get_one::<String>("clear_color").unwrap().clone();
+    SceneConfig { clear_color }
+}
+
+fn get_resolution(matches: &ArgMatches) -> Result<Resolution> {
     let mut args = matches
         .get_many::<String>("size")
         .expect("should have at least one value");
@@ -158,7 +169,7 @@ fn get_video_size(matches: &ArgMatches) -> Result<(u32, u32)> {
     } else {
         let width = args.next().expect("should have two values").parse()?;
         let height = args.next().expect("should have two values").parse()?;
-        Ok((width, height))
+        Ok(Resolution { width, height })
     }
 }
 
@@ -189,7 +200,7 @@ fn get_buf_time(matches: &ArgMatches) -> Result<[f64; 2]> {
 
 fn render(matches: &ArgMatches) -> Result<()> {
     let (music, name) = get_song_and_name(matches)?;
-    let (width, height) = get_video_size(matches)?;
+    let Resolution { width, height } = get_resolution(matches)?;
     let format = get_video_format(matches)?;
 
     let output = Output {
@@ -201,9 +212,7 @@ fn render(matches: &ArgMatches) -> Result<()> {
         format,
         save_frames: false,
     };
-
-    let clear_color = matches.get_one::<String>("clear_color").unwrap().clone();
-    let scene_config = SceneConfig { clear_color };
+    let scene_config = get_scene_config(matches);
     let visualizer_config = get_visualizer_config(matches)?;
     let buf_size = matches.get_one::<String>("buffer_count").unwrap().parse()?;
 
@@ -219,16 +228,24 @@ fn render(matches: &ArgMatches) -> Result<()> {
 }
 
 fn preview(matches: &ArgMatches) -> Result<()> {
+    use ranim::cmd::preview::{RanimPreviewApp, run_app};
+
     let (music, name) = get_song_and_name(matches)?;
     let visualizer_config = get_visualizer_config(matches)?;
     let music = Arc::new(music);
-    let video_size = get_video_size(matches)?;
-    let constructor = |r: &mut RanimScene| {
-        midi_visualizer_scene(r, music.clone(), &visualizer_config, video_size);
+    let resolution = get_resolution(matches)?;
+    let constructor = move |r: &mut RanimScene| {
+        midi_visualizer_scene(r, music.clone(), &visualizer_config, resolution);
     };
-    let mut app = RanimPreviewApp::new(constructor, name);
-    let clear_color = matches.get_one::<String>("clear_color").unwrap().clone();
-    app.set_clear_color_str(&clear_color);
+    let mut app = RanimPreviewApp::new(constructor, name, get_scene_config(matches));
+    app.set_resolution(resolution);
     run_app(app);
+
     Ok(())
+}
+
+fn ui() {
+    use ranim_midi_visualizer_ui::{MidiVisualizerApp, run_app};
+    let app = MidiVisualizerApp::default();
+    run_app(app);
 }

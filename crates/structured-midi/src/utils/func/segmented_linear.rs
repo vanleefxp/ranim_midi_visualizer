@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]
 
+use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use ranim::prelude::Interpolatable;
@@ -43,51 +44,17 @@ impl InvertInterpolatable for f64o {
 }
 
 /// Representation of a continuous segmented linear function.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, AsRef, AsMut, From, Into)]
 pub struct SegmentedLinearFn<X, Y> {
     points: BTreeMap<X, Y>,
 }
 
-impl<X, Y> Default for SegmentedLinearFn<X, Y> {
-    fn default() -> Self {
-        Self {
-            points: Default::default(),
-        }
-    }
-}
-
-impl<X, Y> SegmentedLinearFn<X, Y> {
-    pub fn add_point(&mut self, x: X, y: Y)
-    where
-        X: Ord,
-    {
-        self.points.insert(x.into(), y.into());
-    }
-
-    pub fn add_points(&mut self, points: impl IntoIterator<Item = (X, Y)>)
-    where
-        X: Ord,
-    {
-        self.points.extend(points);
-    }
-
-    pub fn from_points(points: impl IntoIterator<Item = (X, Y)>) -> Self
-    where
-        X: Ord,
-    {
-        let points = points.into_iter().collect();
-        Self { points }
-    }
-
-    pub fn points(&self) -> impl Iterator<Item = (&X, &Y)>
-    where
-        X: Ord,
-    {
-        self.points.iter()
-    }
-
-    pub fn n_points(&self) -> usize {
-        self.points.len()
+impl<X, Y> FromIterator<(X, Y)> for SegmentedLinearFn<X, Y>
+where
+    X: Ord,
+{
+    fn from_iter<T: IntoIterator<Item = (X, Y)>>(iter: T) -> Self {
+        BTreeMap::from_iter(iter).into()
     }
 }
 
@@ -146,7 +113,7 @@ where
     }
 }
 
-trait XAddRequirement = Ord + Clone + InvertInterpolatable;
+trait XAddRequirement = Ord + Clone + InvertInterpolatable + Default;
 trait YAddRequirement = Clone
     + for<'a> AddAssign<&'a Self>
     + for<'a> Add<&'a Self, Output = Self>
@@ -159,11 +126,11 @@ where
     Y: YAddRequirement,
 {
     fn add_assign(&mut self, rhs: &Self) {
-        match rhs.n_points() {
+        match rhs.len() {
             0 => return,
             1 => {
                 let (x0, y0) = rhs.points.iter().next().unwrap();
-                if self.n_points() == 0 {
+                if self.len() == 0 {
                     self.points.insert(x0.clone(), y0.clone());
                 } else {
                     self.points.iter_mut().for_each(|(_, y)| *y += y0);
@@ -227,7 +194,7 @@ where
     type Output = Self;
 
     fn add(self, mut rhs: Self) -> Self {
-        match self.n_points() {
+        match self.len() {
             0 => rhs,
             1 => {
                 let y0 = self.points.iter().next().unwrap().1;
@@ -258,7 +225,7 @@ mod tests {
 
     #[test]
     fn test_segmented_linear_fn() {
-        let f = SegmentedLinearFn::from_points(
+        let f = SegmentedLinearFn::from_iter(
             [(0., 0.), (1., 1.), (2., 1.), (3., 2.), (4., 0.)].map(|(x, y)| (f64o::from(x), y)),
         );
         assert!(f(&f64o::from(-1.)) - 0. < 1e-10);
@@ -271,11 +238,11 @@ mod tests {
 
     #[test]
     fn test_segmented_linear_fn_add() {
-        let f = SegmentedLinearFn::from_points(
+        let f = SegmentedLinearFn::from_iter(
             [(0., 0.), (1., 1.), (2., 1.), (3., 2.), (4., 0.)].map(|(x, y)| (f64o::from(x), y)),
         );
         let g =
-            SegmentedLinearFn::from_points([(-1., 0.), (5., 1.)].map(|(x, y)| (f64o::from(x), y)));
+            SegmentedLinearFn::from_iter([(-1., 0.), (5., 1.)].map(|(x, y)| (f64o::from(x), y)));
         let h = f + g;
         dbg!(&h);
     }

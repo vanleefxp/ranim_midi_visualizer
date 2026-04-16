@@ -1,6 +1,6 @@
 [package]
-name = "ranim_midi_visualizer"
-version = "0.1.1"
+name = "ranim-midi-visualizer"
+version = "0.1.2"
 edition = "2024"
 authors = ["F.X.P. <litran39@hotmail.com>"]
 license = "MIT"
@@ -17,39 +17,53 @@ uncased = "0.9.10"
 color = "0.3.2"
 phf = { version = "0.13.1", features = ["macros", "uncased"] }
 structured-midi = { workspace = true }
+async-channel = "2.5.0"
+web-time = "1.1.0"
+eframe = { workspace = true }
+wgpu = "27.0.1"
+ranim-midi-visualizer_lib = { workspace = true }
+ranim-midi-visualizer_ui = { path = "crates/ranim-midi-visualizer_ui" }
 
 [dependencies.clap]
 version = "4.5.57"
 features = ["cargo", "color"]
 
-[dependencies.ranim_midi_visualizer_lib]
-path = "crates/ranim_midi_visualizer_lib"
-features = ["serde"]
-
 [workspace]
 members = [
     "crates/ranim_music",
-    "crates/ranim_midi_visualizer_lib",
-    "crates/ranim_path_bool",
+    "crates/ranim-midi-visualizer_lib",
+    # "crates/ranim_path_bool",
     "crates/structured-midi",
+    "crates/ranim-midi-visualizer_ui",
+    "crates/music-utils",
 ]
 
 [workspace.dependencies]
 itertools = "0.14.0"
 int-enum = "1.2.0"
+eframe = "0.34.1"
+egui_dock = "0.18.0"
+egui-phosphor = "0.12.0"
+rfd = "0.17.2"
+num-integer = "0.1.46"
+glam = "0.32.1"
+ordered-float = "5.1.0"
 structured-midi = { path = "crates/structured-midi" }
 ranim_music = { path = "crates/ranim_music" }
+music-utils = { path = "crates/music-utils" }
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
-# branch = "feat/merged-gpu-buffer"
 features = ["render"]
 
 [workspace.dependencies.ranim-macros]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
-# branch = "feat/merged-gpu-buffer"
+
+[workspace.dependencies.ranim-midi-visualizer_lib]
+path = "crates/ranim-midi-visualizer_lib"
+features = ["serde"]
 
 [workspace.dependencies.derive_more]
 version = "2.1.1"

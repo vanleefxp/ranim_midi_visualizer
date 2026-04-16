@@ -13,6 +13,8 @@ ranim = { workspace = true }
 ranim-macros = { workspace = true }
 serde = { version = "1.0.228", optional = true }
 derive_more = { workspace = true }
+music-utils = { workspace = true }
+glam = { workspace = true }
 
 [features]
-serde = ["dep:serde"]
+serde = ["dep:serde", "glam/serde"]

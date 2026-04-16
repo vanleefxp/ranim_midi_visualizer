@@ -1,5 +1,5 @@
 [package]
-name = "ranim_midi_visualizer_lib"
+name = "ranim-midi-visualizer_lib"
 version = "0.1.0"
 edition = "2024"
 
@@ -12,9 +12,9 @@ malachite-base = "0.9.1"
 itertools = { workspace = true }
 glam = "0.30.10"
 color = "0.3.2"
-ordered-float = "5.1.0"
 ranim_music = { workspace = true }
 structured-midi = { workspace = true }
+music-utils = { workspace = true }
 
 [features]
 serde = [

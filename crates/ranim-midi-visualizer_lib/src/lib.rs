@@ -1,23 +1,15 @@
-#![feature(
-    range_into_bounds,
-    unboxed_closures,
-    fn_traits,
-    trait_alias,
-    iter_map_windows
-)]
-
 pub mod cyc_index;
-pub mod linear;
 pub mod stroke_and_fill;
 
-use std::{collections::BTreeMap, ops::Range, sync::Arc};
+use std::{ops::Range, sync::Arc};
 
-use crate::{cyc_index::IndexCyc as _, linear::SegmentedLinearFn};
+use crate::cyc_index::IndexCyc as _;
 use itertools::Itertools as _;
+use music_utils::is_black_key;
 use ranim::{
     Output, SceneConfig,
     anims::{func::Func, morph::MorphAnim},
-    cmd::render::render_scene_output,
+    cmd::{preview::Resolution, render::render_scene_output},
     color::{AlphaColor, Srgb},
     core::animation::{Eval, StaticAnim as _},
     glam::{DVec2, DVec3, dvec2, dvec3},
@@ -29,7 +21,7 @@ use ranim::{
     utils::rate_functions::linear,
 };
 
-use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardSize, PianoPedals, is_black_key};
+use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardConfig, PianoPedals};
 use structured_midi::{MidiMusic, MultiTrackLoc, MultiTrackMidiNote, MultiTrackPedalInstant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -41,11 +33,25 @@ pub enum ColorBy {
     KeyColor,
 }
 
+/// Configuration for the bottom status bar displaying data.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StatusBarConfig {
+    /// font size unit
     pub em_size: f64,
+    /// bottom-left and top-right paddings
     pub padding: [DVec2; 2],
+    /// background color
+    pub bg_color: AlphaColor<Srgb>,
+    /// text color
+    pub fg_color: AlphaColor<Srgb>,
+}
+
+impl StatusBarConfig {
+    /// Returns the height of the status bar. Equals to the sum of top padding, bottom padding, and font em-size.
+    pub fn height(&self) -> f64 {
+        self.em_size + self.padding[0].y + self.padding[1].y
+    }
 }
 
 impl Default for StatusBarConfig {
@@ -53,22 +59,30 @@ impl Default for StatusBarConfig {
         Self {
             em_size: 0.2,
             padding: [dvec2(0.1, 0.1), dvec2(0.1, 0.05)],
+            bg_color: AlphaColor::BLACK.with_alpha(0.5),
+            fg_color: AlphaColor::WHITE,
         }
     }
 }
 
+/// Top progress bar displaying the current time position in the song.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProgressBarConfig {
+    /// progress bar height
     pub height: f64,
-    pub color: AlphaColor<Srgb>,
+    /// progress bar foreground color
+    pub fg_color: AlphaColor<Srgb>,
+    /// progress bar background color
+    pub bg_color: AlphaColor<Srgb>,
 }
 
 impl Default for ProgressBarConfig {
     fn default() -> Self {
         Self {
             height: 0.06,
-            color: AlphaColor::from_rgb8(168, 163, 204), // rgb(168, 163, 204)
+            fg_color: AlphaColor::from_rgb8(168, 163, 204), // rgb(168, 163, 204)
+            bg_color: AlphaColor::TRANSPARENT,
         }
     }
 }
@@ -81,8 +95,7 @@ pub struct MidiVisualizerConfig {
     pub scroll_speed: f64,
     pub color_by: ColorBy,
     pub buf_time: [f64; 2],
-    pub keyboard_size: PianoKeyboardSize,
-    pub key_range: Range<i8>,
+    pub keyboard_config: PianoKeyboardConfig,
     pub status_bar_config: StatusBarConfig,
     pub progress_bar_config: ProgressBarConfig,
     pub time_window: f64,
@@ -102,8 +115,7 @@ impl Default for MidiVisualizerConfig {
             color_by: ColorBy::Channel,
             scroll_speed: 2.,
             buf_time: [2., 2.],
-            keyboard_size: Default::default(),
-            key_range: -39..49,
+            keyboard_config: Default::default(),
             status_bar_config: Default::default(),
             progress_bar_config: Default::default(),
             time_window: 1.,
@@ -123,7 +135,7 @@ pub fn midi_visualizer_scene(
     r: &mut RanimScene,
     song: Arc<MidiMusic>,
     config: &MidiVisualizerConfig,
-    video_size: (u32, u32),
+    resolution: Resolution,
 ) {
     let cam = CameraFrame::default();
     r.insert(cam.clone());
@@ -136,11 +148,7 @@ pub fn midi_visualizer_scene(
             StatusBarConfig {
                 em_size: font_size,
                 padding,
-            },
-        progress_bar_config:
-            ProgressBarConfig {
-                height: progress_bar_height,
-                color: progress_bar_color,
+                ..
             },
         time_window,
         ..
@@ -150,44 +158,74 @@ pub fn midi_visualizer_scene(
     let time_window_nano = (time_window * 1e9) as u64;
 
     let frame_height = cam.frame_height;
-    let frame_width = frame_height * video_size.0 as f64 / video_size.1 as f64;
-    let frame_bottom_left = dvec3(-frame_width / 2., -frame_height / 2., 0.);
+    let frame_width = frame_height * resolution.width as f64 / resolution.height as f64;
+    let frame_rx = frame_width / 2.;
+    let frame_ry = frame_height / 2.;
+    let frame_bottom_left = dvec3(-frame_rx, -frame_ry, 0.);
+    let frame_bottom_right = dvec3(frame_rx, -frame_ry, 0.);
     let frame_top_left = dvec3(-frame_width / 2., frame_height / 2., 0.);
+    let progress_bar_height = config.progress_bar_config.height;
     let progress_bar_min = frame_top_left - DVec3::Y * progress_bar_height;
-    let status_bar_height = font_size + padding[0].y + padding[1].y;
+    let status_bar_height = config.status_bar_config.height();
 
     // Static Items
     //
     r.insert_with(|tl| {
-        let rect_setup = |item: &mut Rectangle| {
-            item.set_color(AlphaColor::BLACK.with_alpha(0.5))
-                .set_stroke_opacity(0.)
-                .shift(DVec3::NEG_Z * 1e-4)
-                .discard()
-        };
         // Bottom rect for status bar
         let i_status_bar_rect =
             Rectangle::from_min_size(frame_bottom_left, dvec2(frame_width, status_bar_height))
-                .with(rect_setup);
+                .with(|item| {
+                    item.set_color(config.status_bar_config.bg_color)
+                        .set_stroke_opacity(0.)
+                        .shift(DVec3::NEG_Z * 1e-4)
+                        .discard()
+                });
         tl.play(i_status_bar_rect.show());
+
+        // top rect for progress bar
+        let i_progress_bar_rect =
+            Rectangle::from_min_size(progress_bar_min, dvec2(frame_width, progress_bar_height))
+                .with(|item| {
+                    item.set_fill_color(config.progress_bar_config.bg_color)
+                        .set_stroke_opacity(0.)
+                        .shift(DVec3::Z * 1e-4)
+                        .discard()
+                });
+        tl.play(i_progress_bar_rect.show());
     });
 
-    let i_keyboard_tem = PianoKeyboard::default().with(|item| {
-        item.set_size(|size| *size = config.keyboard_size.clone())
-            .set_key_range(config.key_range.clone());
+    // a template of the piano keyboard item
+    // in the animation this item will be cloned with highlighted keys altered
+    let (i_keyboard_tem, keyboard_height) = {
+        // the keyboard width should fill the screen width
+        let Range {
+            start: rel_left,
+            end: rel_right,
+        } = config.keyboard_config.width_range(false);
+        let size_unit = frame_width / (rel_right - rel_left);
+        let keyboard_height = config.keyboard_config.size.white_height * size_unit;
 
-        let width = item.aabb_size().x;
-        let scale_factor = frame_width / width;
-        item.scale(DVec3::splat(scale_factor));
-        item.move_anchor_to(
-            AabbPoint(dvec3(-1., -1., -1.)),
-            frame_bottom_left + status_bar_height * DVec3::Y,
-        );
-    });
+        // The keyboard's origin is where the middle C key's top left corner is located
+        let keyboard_origin = frame_bottom_left
+            + dvec3(
+                -rel_left * size_unit,
+                status_bar_height + keyboard_height,
+                0.,
+            );
+
+        (
+            PianoKeyboard::new(config.keyboard_config.clone(), keyboard_origin, size_unit),
+            keyboard_height,
+        )
+    };
+
+    // pedals on the bottom-right corner of the remaining space
     let i_pedals_tem = PianoPedals::default().with(|item| {
         item.move_anchor_to(
             AabbPoint(dvec3(1., -1., 0.)),
-            i_keyboard_tem.aabb()[1] + dvec3(-0.2, 0.2, 1e-4),
+            frame_bottom_right
+                + DVec3::Y * (status_bar_height + keyboard_height)
+                + dvec3(-0.2, 0.2, 1e-4),
         )
         .discard()
     });
@@ -195,6 +233,9 @@ pub fn midi_visualizer_scene(
     let scroll_height = frame_height - i_keyboard_tem.aabb_size().y;
     let scroll_time = scroll_height / scroll_speed;
     let duration = song.duration() as f64 / 1e9;
+
+    let midi_time_to_scene_time =
+        |midi_time: u64| midi_time as f64 / 1e9 + buf_time[0] + scroll_time;
 
     let instants = song.instants().collect::<Vec<_>>();
     let text_origin = |n_columns: usize, column: usize| {
@@ -208,7 +249,7 @@ pub fn midi_visualizer_scene(
     //
     r.insert_with(|tl| {
         let progress_bar_setup = |item: &mut Rectangle| {
-            item.set_fill_color(progress_bar_color)
+            item.set_fill_color(config.progress_bar_config.fg_color)
                 .set_stroke_opacity(0.)
                 .shift(DVec3::Z * 2e-4)
                 .discard()
@@ -277,22 +318,19 @@ pub fn midi_visualizer_scene(
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
 
-        let mut note_count = 0usize;
-        let mut i_note_count = create_note_count_text(note_count);
-        tl.play(i_note_count.show())
-            .forward(buf_time[0] + scroll_time);
-
-        for instant in instants.iter().filter(|instant| instant.is_start()) {
-            tl.forward_to(instant.time as f64 / 1e9 + buf_time[0] + scroll_time);
-            note_count += 1;
-            tl.play(i_note_count.hide());
+        let mut i_note_count = create_note_count_text(0);
+        tl.play(i_note_count.show());
+        for (time, note_count) in song
+            .note_count_iter()
+            .map(|(time, note_count)| (midi_time_to_scene_time(time), note_count))
+        {
+            tl.forward_to(time).play(i_note_count.hide());
             i_note_count = create_note_count_text(note_count);
             tl.play(i_note_count.show());
         }
     });
 
     // Note Per Second
-    //
     r.insert_with(|tl| {
         let origin = text_origin(4, 2);
         let create_nps_text = |nps: f64, nps_max: f64| {
@@ -301,114 +339,23 @@ pub fn midi_visualizer_scene(
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
 
-        // track instants where the start of notes enter or exit the time window
-        // this is more efficnet than creating an animation that updates the NPS value every frame
-        // because NPS only changes in these tracked instants
-        //
-        let mut nps_changes: BTreeMap<u64, isize> = BTreeMap::new();
-        for (range, _) in song.notes() {
-            let enter_time = range.start;
-            let exit_time = range.start + time_window_nano;
-            nps_changes
-                .entry(enter_time)
-                .and_modify(|cnt| *cnt += 1)
-                .or_insert(1);
-            nps_changes
-                .entry(exit_time)
-                .and_modify(|cnt| *cnt -= 1)
-                .or_insert(-1);
-        }
-
-        let mut n_notes_in_window = 0usize;
-        let mut n_notes_in_window_max = 0usize;
+        let mut nps_max = 0.;
         let mut i_nps_text = create_nps_text(0., 0.);
         tl.play(i_nps_text.show());
-
-        for (time, n_enter) in nps_changes {
-            // update the note count in the time window
-            if n_enter > 0 {
-                n_notes_in_window += n_enter as usize;
-                // maximum only increases when a note enters the window
-                if n_notes_in_window > n_notes_in_window_max {
-                    n_notes_in_window_max = n_notes_in_window;
-                }
-            } else {
-                // as all notes must first enter and then exit the time window
-                // the count should be at least 1 at this point
-                let n_exit = (-n_enter) as usize;
-                assert!(n_notes_in_window >= n_exit);
-                n_notes_in_window -= n_exit;
-            }
-            let t = time as f64 / 1e9 + buf_time[0] + scroll_time;
-            let nps = n_notes_in_window as f64 / time_window;
-            let nps_max = n_notes_in_window_max as f64 / time_window;
-            tl.forward_to(t).play(i_nps_text.hide());
+        for (time, nps) in song
+            .nps_iter(time_window_nano)
+            .map(|(time, nps)| (midi_time_to_scene_time(time), nps))
+        {
+            nps_max = nps.max(nps_max);
+            tl.forward_to(time).play(i_nps_text.hide());
             i_nps_text = create_nps_text(nps, nps_max);
             tl.play(i_nps_text.show());
         }
-        assert_eq!(n_notes_in_window, 0);
     });
 
     // Legato Index
-    //
-    // *Legato index* is a measure describing how continuously a series of notes are played.
-    // This index was put forward by Wiwi Kuan in his Pianometer program.
-    // See: https://nicechord.com/pianometer/
-    //
-    // The calculation of legato index in a certain time window is done as follows:
-    //
-    // + take the intersection of the time window and note ranges
-    // + sum the lengths of the intersecting parts of the notes and the time window
-    // + divide the sum by the length of the time window
-    //
-    // This program used to calculate the legato index directly by the above-mentioned definition,
-    // However, this approach can be optimized given the observation that the changing of legato index is a segmented
-    // linear function to time.
-    //
     r.insert_with(|tl| {
-        // the legato score function is _additive_, meaning that we can sum the legato score functions of each note
-        // to get the total legato score function of the song.
-        // So the first step is to create the legato score function for each note.
-        let legato_score_fn: SegmentedLinearFn<u64, f64> = song
-            .notes()
-            .map(|(range, _)| {
-                // When it comes to the calculation of single-note legato score function, there are two cases:
-                let Range { start, end } = range;
-                let duration = end - start;
-                SegmentedLinearFn::from_points(if duration > time_window_nano {
-                    // Case 1: the note is longer than the time window
-                    //
-                    //                  =========                     window
-                    //                           -----------------    t = start             legato = 0
-                    //                  -----------------             t = start + window    legato = 1
-                    //          -----------------                     t = end               legato = 1
-                    // -----------------                              t = end + window      legato = 0
-                    //
-                    [
-                        (start, 0.),
-                        (start + time_window_nano, 1.),
-                        (end, 1.),
-                        (end + time_window_nano, 0.),
-                    ]
-                } else {
-                    // Case 2: the note is shorter than the time window
-                    //
-                    //                  ========                      window
-                    //                          -----                 t = start             legato = 0
-                    //                     -----                      t = end               legato = duration / window
-                    //                  -----                         t = start + window    legato = duration / window
-                    //             -----                              t = end + window      legato = 0
-                    //
-                    let max_value = duration as f64 / time_window_nano as f64;
-                    [
-                        (start, 0.),
-                        (end, max_value),
-                        (start + duration, max_value),
-                        (end + time_window_nano, 0.),
-                    ]
-                })
-            })
-            .sum();
+        let legato_score_fn = song.legato_fn(time_window_nano);
         let origin = text_origin(4, 3);
 
         // font and font size are config variables
@@ -423,12 +370,12 @@ pub fn midi_visualizer_scene(
 
         let i_text = create_legato_text(0.);
         tl.play(i_text.show());
-        if let Some((&t0, _)) = legato_score_fn.points().next() {
+        if let Some((&t0, _)) = legato_score_fn.iter().next() {
             // value before `t0` should be 0.
             // because no note is in the window
-            tl.forward_to(buf_time[0] + scroll_time + t0 as f64 / 1e9)
+            tl.forward_to(midi_time_to_scene_time(t0))
                 .play(i_text.hide());
-            for ((_, &v1), (&t2, &v2)) in legato_score_fn.points().tuple_windows() {
+            for ((_, &v1), (&t2, &v2)) in legato_score_fn.iter().tuple_windows() {
                 // clone values so that they can be moved into the closure
                 let create_legato_text = create_legato_text.clone();
                 let v2 = v2;
@@ -459,7 +406,7 @@ pub fn midi_visualizer_scene(
             tl.forward_to(instant.time as f64 / 1e9 + buf_time[0] + scroll_time);
             tl.play(i_keyboard.hide());
             i_keyboard = i_keyboard.with(|item| {
-                let key = instant.key() as i8 - 60;
+                let key = instant.key();
 
                 if instant.is_start() {
                     item.highlight_keys(|m| {
@@ -489,7 +436,6 @@ pub fn midi_visualizer_scene(
             key,
             vel,
         } = note;
-        let key = key as i8 - 60;
 
         let t_start = start as f64 / 1e9 + buf_time[0];
         let duration = (end - start) as f64 / 1e9;
@@ -522,7 +468,6 @@ pub fn midi_visualizer_scene(
     }
 
     // Pedals
-    //
     r.insert_with(|tl| {
         let mut i_pedals = i_pedals_tem.clone();
         tl.play(i_pedals.show()).forward(buf_time[0] + scroll_time);
@@ -536,7 +481,7 @@ pub fn midi_visualizer_scene(
                 ..
             } = instant;
             let pedal_type = Pedal::try_from(pedal_type as u8).expect("should be successful");
-            tl.forward_to(time as f64 / 1e9 + buf_time[0] + scroll_time)
+            tl.forward_to(midi_time_to_scene_time(time))
                 .play(i_pedals.hide());
             i_pedals = i_pedals.with(|item| {
                 item.set_pedal_status(pedal_type, value);
@@ -554,9 +499,9 @@ pub fn render_midi_visualizer(
     output: &Output,
     buffer_count: usize,
 ) {
-    let video_size = (output.width, output.height);
+    let resolution = Resolution::new(output.width, output.height);
     let constructor = |r: &mut RanimScene| {
-        midi_visualizer_scene(r, song.clone(), visualizer_config, video_size);
+        midi_visualizer_scene(r, song.clone(), visualizer_config, resolution);
     };
     render_scene_output(
         constructor,
