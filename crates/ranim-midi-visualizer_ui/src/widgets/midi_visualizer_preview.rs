@@ -7,8 +7,8 @@ use eframe::{
     epaint,
 };
 use music_utils::{
-    black_idx_to_prev_white_idx, black_tone, is_black_key, is_black_key_otone, key_idx_of_color,
-    octave_range, white_idx_to_next_black_idx, white_tone,
+    KeyInfo, black_idx_to_prev_white_idx, black_tone, is_black_key, is_black_key_otone,
+    key_idx_of_color, key_info, octave_range, white_idx_to_next_black_idx, white_tone,
 };
 use ranim::{
     SceneConfig,
@@ -20,7 +20,7 @@ use ranim_midi_visualizer_lib::{
     ColorBy, MidiVisualizerConfig, ProgressBarConfig, StatusBarConfig, cyc_index::IndexCyc,
 };
 use std::{collections::HashMap, f32::consts::PI as PI_f32, ops::Range};
-use structured_midi::MidiMusic;
+use structured_midi::{MidiMusic, MultiTrackMidiNote};
 
 type f64o = OrderedFloat<f64>;
 
@@ -362,17 +362,16 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 p.rect_filled(fg_rect, 0., fg_color);
             }
 
-            // piano keys
+            // Keys and notes
             {
-                // TODO: paint piano keys
                 let key_range = &self.visualizer_config.keyboard_config.key_range;
                 let keyboard_size = &self.visualizer_config.keyboard_config.size;
                 let keyboard_color = &self.visualizer_config.keyboard_config.color;
+                let color_by = self.visualizer_config.color_by;
+                let note_colors = self.visualizer_config.colors.as_slice();
 
                 let highlighted_keys: HashMap<_, _> = {
                     let time_range = self.time..self.time;
-                    let color_by = self.visualizer_config.color_by;
-                    let note_colors = self.visualizer_config.colors.as_slice();
                     let notes_on = self
                         .music
                         .notes_between_iter(&time_range, key_range)
@@ -448,147 +447,233 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     })
                 });
 
-                // key shape creation functions
-                let white_key_shape = |octave: i8, white_idx: u8, cutoff_mask: [bool; 2]| {
-                    let origin = egui_key_origin
-                        + egui::vec2((white_idx as f32 + octave as f32 * 7.) * egui_key_unit, 0.);
-                    let tone = white_tone(octave, white_idx);
-                    PianoKeyShape {
-                        origin,
-                        size: egui_white_size,
-                        corner_size: egui_corner_size,
-                        fill_color: highlighted_keys
-                            .get(&tone)
-                            .map(|&v| to_egui_color(v.with_alpha(white_color.components[3])))
-                            .unwrap_or_else(|| egui_white_color),
-                        stroke: egui_stroke.clone(),
-                        cutoff: std::array::from_fn(|i| {
-                            if cutoff_mask[i] {
-                                egui_overlaps[white_idx as usize][i]
-                            } else {
-                                None
-                            }
-                        }),
-                    }
+                let white_key_origin = |octave: i8, white_idx: u8| {
+                    egui_key_origin
+                        + egui::vec2((white_idx as f32 + octave as f32 * 7.) * egui_key_unit, 0.)
                 };
-                let black_key_shape = |octave: i8, black_idx: u8| {
+
+                let black_key_origin = |octave: i8, black_idx: u8| {
                     let white_idx = black_idx_to_prev_white_idx(black_idx);
                     let disp = keyboard_size.black_offset[black_idx as usize];
-                    let origin = egui_key_origin
+                    egui_key_origin
                         + egui::vec2(
                             (white_idx as f32 + octave as f32 * 7. + 1.) * egui_key_unit
                                 + egui_black_size.x * (disp - 1.) as f32 / 2.,
                             0.,
-                        );
-                    let tone = black_tone(octave, black_idx);
-                    PianoKeyShape {
-                        origin,
-                        size: egui_black_size,
-                        corner_size: egui_corner_size,
-                        fill_color: highlighted_keys
-                            .get(&tone)
-                            .map(|&v| {
-                                to_egui_color(
-                                    v.map_lightness(|v| v - 0.2)
-                                        .with_alpha(black_color.components[3]),
-                                )
-                            })
-                            .unwrap_or_else(|| egui_black_color),
-                        stroke: egui_stroke.clone(),
-                        cutoff: [None, None],
-                    }
+                        )
                 };
 
-                // If the first key is white, then draw it.
-                // In this case the first key's left side doesn't need cutoff.
-                // Returns from which index of white / black keys to start drawing (inclusive).
-                let draw_first_key = || {
-                    let otone_start = (tone_start - (o_start - 1) * 12) as u8;
-                    if is_black_key_otone(otone_start) {
-                        let black_idx = key_idx_of_color(otone_start);
-                        let white_idx = black_idx_to_prev_white_idx(black_idx) + 1;
-
-                        (white_idx, black_idx)
-                    } else {
-                        let white_idx = key_idx_of_color(otone_start);
-                        p.add(white_key_shape(o_start - 1, white_idx, [false, true]));
-                        let black_idx = white_idx_to_next_black_idx(white_idx);
-                        (white_idx + 1, black_idx)
-                    }
+                let key_origin_and_color = |key: i8| {
+                    let KeyInfo {
+                        octave,
+                        is_black,
+                        idx_of_color,
+                    } = key_info(key);
+                    (
+                        if is_black {
+                            black_key_origin(octave, idx_of_color)
+                        } else {
+                            white_key_origin(octave, idx_of_color)
+                        },
+                        is_black,
+                    )
                 };
 
-                // If the last key is white, then draw it.
-                // In this case the last key's right side doesn't need cutoff.
-                // Returns from which index of white / black keys to end drawing (not inclusive).
-                let draw_last_key = || {
-                    let otone_end = (tone_end - o_end * 12) as u8 - 1;
-                    if is_black_key_otone(otone_end) {
-                        let black_idx = key_idx_of_color(otone_end);
-                        let white_idx = black_idx_to_prev_white_idx(black_idx);
+                // Piano keys
+                {
+                    // create a white key shape
+                    let white_key_shape = |octave: i8, white_idx: u8, cutoff_mask: [bool; 2]| {
+                        let origin = white_key_origin(octave, white_idx);
+                        let tone = white_tone(octave, white_idx);
+                        PianoKeyShape {
+                            origin,
+                            size: egui_white_size,
+                            corner_size: egui_corner_size,
+                            fill_color: highlighted_keys
+                                .get(&tone)
+                                .map(|&v| to_egui_color(v.with_alpha(white_color.components[3])))
+                                .unwrap_or_else(|| egui_white_color),
+                            stroke: egui_stroke.clone(),
+                            cutoff: std::array::from_fn(|i| {
+                                if cutoff_mask[i] {
+                                    egui_overlaps[white_idx as usize][i]
+                                } else {
+                                    None
+                                }
+                            }),
+                        }
+                    };
 
-                        (white_idx + 1, black_idx + 1)
-                    } else {
-                        let white_idx = key_idx_of_color(otone_end);
-                        p.add(white_key_shape(o_end, white_idx, [true, false]));
-                        let black_idx = white_idx_to_next_black_idx(white_idx);
+                    // create a black key shape
+                    let black_key_shape = |octave: i8, black_idx: u8| {
+                        let origin = black_key_origin(octave, black_idx);
+                        let tone = black_tone(octave, black_idx);
+                        PianoKeyShape {
+                            origin,
+                            size: egui_black_size,
+                            corner_size: egui_corner_size,
+                            fill_color: highlighted_keys
+                                .get(&tone)
+                                .map(|&v| {
+                                    to_egui_color(
+                                        v.map_lightness(|v| v - 0.2)
+                                            .with_alpha(black_color.components[3]),
+                                    )
+                                })
+                                .unwrap_or_else(|| egui_black_color),
+                            stroke: egui_stroke.clone(),
+                            cutoff: [None, None],
+                        }
+                    };
 
-                        (white_idx, black_idx)
-                    }
-                };
+                    // If the first key is white, then draw it.
+                    // In this case the first key's left side doesn't need cutoff.
+                    // Returns from which index of white / black keys to start drawing (inclusive).
+                    let draw_first_key = || {
+                        let otone_start = (tone_start - (o_start - 1) * 12) as u8;
+                        if is_black_key_otone(otone_start) {
+                            let black_idx = key_idx_of_color(otone_start);
+                            let white_idx = black_idx_to_prev_white_idx(black_idx) + 1;
 
-                if o_end < o_start {
-                    // all keys within the same octave
-                    let (white_idx_start, black_idx_start) = draw_first_key();
-                    let (white_idx_end, black_idx_end) = draw_last_key();
+                            (white_idx, black_idx)
+                        } else {
+                            let white_idx = key_idx_of_color(otone_start);
+                            p.add(white_key_shape(o_start - 1, white_idx, [false, true]));
+                            let black_idx = white_idx_to_next_black_idx(white_idx);
+                            (white_idx + 1, black_idx)
+                        }
+                    };
 
-                    for white_idx in white_idx_start..white_idx_end {
-                        p.add(white_key_shape(o_end, white_idx, [true, true]));
-                    }
-                    for black_idx in black_idx_start..black_idx_end {
-                        p.add(black_key_shape(o_end, black_idx));
-                    }
-                } else {
-                    // first incomplete octave
-                    {
+                    // If the last key is white, then draw it.
+                    // In this case the last key's right side doesn't need cutoff.
+                    // Returns from which index of white / black keys to end drawing (not inclusive).
+                    let draw_last_key = || {
+                        let otone_end = (tone_end - o_end * 12) as u8 - 1;
+                        if is_black_key_otone(otone_end) {
+                            let black_idx = key_idx_of_color(otone_end);
+                            let white_idx = black_idx_to_prev_white_idx(black_idx);
+
+                            (white_idx + 1, black_idx + 1)
+                        } else {
+                            let white_idx = key_idx_of_color(otone_end);
+                            p.add(white_key_shape(o_end, white_idx, [true, false]));
+                            let black_idx = white_idx_to_next_black_idx(white_idx);
+
+                            (white_idx, black_idx)
+                        }
+                    };
+
+                    if o_end < o_start {
+                        // all keys within the same octave
                         let (white_idx_start, black_idx_start) = draw_first_key();
-
-                        for white_idx in white_idx_start..7 {
-                            p.add(white_key_shape(o_start - 1, white_idx, [true, true]));
-                        }
-                        for black_idx in black_idx_start..5 {
-                            p.add(black_key_shape(o_start - 1, black_idx));
-                        }
-                    }
-
-                    // complete octaves
-                    for octave in octave_range(key_range) {
-                        // white keys
-                        for white_idx in 0..7 {
-                            p.add(white_key_shape(octave, white_idx, [true, true]));
-                        }
-                        // black keys
-                        for black_idx in 0..5 {
-                            p.add(black_key_shape(octave, black_idx));
-                        }
-                    }
-
-                    // last incomplete octave
-                    {
                         let (white_idx_end, black_idx_end) = draw_last_key();
 
-                        for white_idx in 0..white_idx_end {
-                            p.add(white_key_shape(o_start - 1, white_idx, [true, true]));
+                        for white_idx in white_idx_start..white_idx_end {
+                            p.add(white_key_shape(o_end, white_idx, [true, true]));
                         }
-                        for black_idx in 0..black_idx_end {
-                            p.add(black_key_shape(o_start - 1, black_idx));
+                        for black_idx in black_idx_start..black_idx_end {
+                            p.add(black_key_shape(o_end, black_idx));
+                        }
+                    } else {
+                        // first incomplete octave
+                        {
+                            let (white_idx_start, black_idx_start) = draw_first_key();
+
+                            for white_idx in white_idx_start..7 {
+                                p.add(white_key_shape(o_start - 1, white_idx, [true, true]));
+                            }
+                            for black_idx in black_idx_start..5 {
+                                p.add(black_key_shape(o_start - 1, black_idx));
+                            }
+                        }
+
+                        // complete octaves
+                        for octave in octave_range(key_range) {
+                            // white keys
+                            for white_idx in 0..7 {
+                                p.add(white_key_shape(octave, white_idx, [true, true]));
+                            }
+                            // black keys
+                            for black_idx in 0..5 {
+                                p.add(black_key_shape(octave, black_idx));
+                            }
+                        }
+
+                        // last incomplete octave
+                        {
+                            let (white_idx_end, black_idx_end) = draw_last_key();
+
+                            for white_idx in 0..white_idx_end {
+                                p.add(white_key_shape(o_start - 1, white_idx, [true, true]));
+                            }
+                            for black_idx in 0..black_idx_end {
+                                p.add(black_key_shape(o_start - 1, black_idx));
+                            }
                         }
                     }
                 }
-            }
 
-            // notes
-            {
-                // TODO: paint notes
+                // notes
+                {
+                    let scroll_speed = self.visualizer_config.scroll_speed;
+                    let egui_scroll_speed = scroll_speed as f32 * unit;
+                    let egui_scroll_height =
+                        egui_view_height - egui_status_bar_height - egui_keyboard_height;
+                    let ranim_scroll_height = (egui_scroll_height / unit) as f64;
+                    let scroll_time = (ranim_scroll_height / scroll_speed * 1e9) as u64;
+                    let time_range = self.time..(scroll_time + self.time);
+                    let visible_notes = self.music.notes_between_iter(&time_range, key_range);
+                    let notes_clip_rect = egui::Rect::from_min_size(
+                        egui_view_top_left,
+                        egui::vec2(egui_view_width, egui_scroll_height),
+                    );
+                    let (white_h_scale, black_h_scale) =
+                        self.visualizer_config.keyboard_config.size.note_h_scale;
+
+                    let time_to_y = |time: u64| {
+                        let y_diff =
+                            (time.abs_diff(self.time) as f64 / 1e9) as f32 * egui_scroll_speed;
+                        let y_diff = if time < self.time { y_diff } else { -y_diff };
+                        y_diff + egui_key_origin.y
+                    };
+
+                    let note_rect = |time_range: Range<u64>, note: MultiTrackMidiNote| {
+                        let (origin, is_black) = key_origin_and_color(note.key);
+                        let y_max = time_to_y(time_range.start);
+                        let y_min = time_to_y(time_range.end);
+                        let (x_min, x_max) = if is_black {
+                            let x_min =
+                                origin.x + ((1. - black_h_scale) / 2.) as f32 * egui_black_size.x;
+                            let x_max = x_min + black_h_scale as f32 * egui_black_size.x;
+                            (x_min, x_max)
+                        } else {
+                            let x_min =
+                                origin.x + ((1. - white_h_scale) / 2.) as f32 * egui_key_unit;
+                            let x_max = x_min + white_h_scale as f32 * egui_key_unit;
+                            (x_min, x_max)
+                        };
+                        egui::Rect::from_two_pos(egui::pos2(x_min, y_min), egui::pos2(x_max, y_max))
+                    };
+
+                    let note_shape = |time_range: Range<u64>, note: MultiTrackMidiNote| {
+                        let rect = note_rect(time_range, note).intersect(notes_clip_rect);
+                        let fill_color = {
+                            use ColorBy::*;
+                            match self.visualizer_config.color_by {
+                                Channel => *note_colors.index_cyc(note.loc.channel as usize),
+                                Track => *note_colors.index_cyc(note.loc.track as usize),
+                                KeyColor => *note_colors.index_cyc(is_black_key(note.key) as usize),
+                            }
+                        }
+                        .with_alpha(note.vel as f32 / 127.);
+                        let fill_color = to_egui_color(fill_color);
+                        epaint::RectShape::filled(rect, 0., fill_color)
+                    };
+
+                    for (time_range, note) in visible_notes {
+                        p.add(note_shape(time_range, note));
+                    }
+                }
             }
 
             // pedals

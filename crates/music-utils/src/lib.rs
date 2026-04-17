@@ -84,3 +84,20 @@ pub const fn white_tone(octave: i8, white_idx: u8) -> i8 {
 pub const fn black_tone(octave: i8, black_idx: u8) -> i8 {
     octave * 12 + black_otone(black_idx) as i8
 }
+
+pub struct KeyInfo {
+    pub octave: i8,
+    pub is_black: bool,
+    pub idx_of_color: u8,
+}
+
+#[inline]
+pub const fn key_info(key: i8) -> KeyInfo {
+    let octave = key.div_floor(12);
+    let otone = (key - octave * 12) as u8;
+    KeyInfo {
+        octave,
+        is_black: is_black_key_otone(otone),
+        idx_of_color: key_idx_of_color(otone),
+    }
+}

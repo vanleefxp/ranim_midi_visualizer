@@ -22,7 +22,7 @@ pub fn to_ranim_color(color: egui::Color32) -> AlphaColor<Srgb> {
 
 pub fn to_egui_color(color: AlphaColor<Srgb>) -> egui::Color32 {
     let Rgba8 { r, g, b, a } = color.to_rgba8();
-    egui::Color32::from_rgba_premultiplied(r, g, b, a)
+    egui::Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
 pub fn nano_to_time_string(nano: u64) -> String {

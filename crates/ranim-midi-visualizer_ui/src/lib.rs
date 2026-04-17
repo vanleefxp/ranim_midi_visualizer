@@ -144,14 +144,24 @@ impl MidiVisualizerAppInner {
     }
 
     pub fn step_frame(&mut self, n: isize) {
+        let playing = self.is_playing();
+        if playing {
+            self.pause();
+        }
+
         // [TODO] when the division is not exact, there can be cumulative error
+        // maybe define a new `StepGrid` struct with `large_step` and `small_step` fields
         let dt = 100_000_000 / self.fps as u64 * n.abs() as u64;
         if n >= 0 {
-            self.time = (self.time + dt).max(self.duration);
+            self.time = (self.time + dt).min(self.duration);
         } else if self.time > dt {
             self.time -= dt;
         } else {
             self.time = 0;
+        }
+
+        if playing {
+            self.play();
         }
     }
 
@@ -173,7 +183,9 @@ impl MidiVisualizerAppInner {
         self.duration = self.music.duration();
         self.clear_cache();
     }
+}
 
+impl MidiVisualizerAppInner {
     fn nps_max_fn(&self) -> Ref<'_, LadderFn<u64, f64>> {
         if self.nps_max_cache.borrow().is_none() {
             let nps_max_fn = self.music.nps_max_fn(self.time_window);
@@ -661,24 +673,23 @@ impl MidiVisualizerAppInner {
         });
 
         // Preview area
-        egui::CentralPanel::default()
-            .show_inside(ui, |ui| {
-                let mut preview_widget = MidiVisualizerPreview::new(
-                    &self.music,
-                    &self.visualizer_config,
-                    &self.scene_config,
-                    self.resolution,
-                    self.time_window,
-                );
-                preview_widget.time = self.time;
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            let mut preview_widget = MidiVisualizerPreview::new(
+                &self.music,
+                &self.visualizer_config,
+                &self.scene_config,
+                self.resolution,
+                self.time_window,
+            );
+            preview_widget.time = self.time;
 
-                let cache = &mut preview_widget.cache;
-                cache.note_count = Some(self.note_count_fn()(&self.time));
-                cache.note_count_total = Some(self.note_count_total());
-                cache.nps_max = Some(self.nps_max_fn()(&self.time));
+            let cache = &mut preview_widget.cache;
+            cache.note_count = Some(self.note_count_fn()(&self.time));
+            cache.note_count_total = Some(self.note_count_total());
+            cache.nps_max = Some(self.nps_max_fn()(&self.time));
 
-                preview_widget.ui(ui);
-            });
+            preview_widget.ui(ui);
+        });
     }
 }
 
