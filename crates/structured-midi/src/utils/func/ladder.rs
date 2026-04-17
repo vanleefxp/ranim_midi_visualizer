@@ -1,6 +1,7 @@
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
 use std::collections::BTreeMap;
 
+/// A ladder function, or a segmented constant function.
 #[derive(Debug, Clone, PartialEq, Eq, Deref, DerefMut, AsRef, AsMut, Default, From, Into)]
 pub struct LadderFn<X, Y> {
     points: BTreeMap<X, Y>,

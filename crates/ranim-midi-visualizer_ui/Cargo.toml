@@ -4,15 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# egui series
 eframe = { workspace = true }
 egui-phosphor = { workspace = true }
 egui_dock = { workspace = true }
-rfd = { workspace = true }
+
+# Ranim series
 ranim = { workspace = true }
 ranim_music = { workspace = true }
 ranim-midi-visualizer_lib = { workspace = true }
+
+rfd = { workspace = true }
 structured-midi = { workspace = true }
 derive_more = { workspace = true }
 music-utils = { workspace = true }
-i_triangle = { version = "0.41.0", features = ["glam"] }
+# i_triangle = { version = "0.41.0", features = ["glam"] }
 ordered-float = { workspace = true }
+async-channel = { workspace = true }
+tracing = { workspace = true }

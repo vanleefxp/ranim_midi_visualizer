@@ -2572,60 +2572,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef68590049bab63a464eee1a1158ac04c6f6613a546d8d90f78636b8b94f171"
 
 [[package]]
-name = "i_float"
-version = "1.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "813145bb0ad5b60f55cbbf3c74cdceda1c0a9d253b35c4cc36ae0df7887cb78f"
-dependencies = [
- "glam 0.32.1",
- "libm",
-]
-
-[[package]]
-name = "i_key_sort"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c4d36ff9fb73dc62e163e25a07523ca5c2126660fb2485cdecf063e59b58f29"
-
-[[package]]
-name = "i_overlay"
-version = "4.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "934cba666ad1bf60436a190af6eaa3f58f57b5bad28268ce3fb45d9185862232"
-dependencies = [
- "i_float",
- "i_key_sort",
- "i_shape",
- "i_tree",
-]
-
-[[package]]
-name = "i_shape"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa9eac533d7509a8ab87672b60ac610c17240f9ea4851d26227689fdfe349c8"
-dependencies = [
- "i_float",
-]
-
-[[package]]
-name = "i_tree"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4804bdc1dc124eb7e1aa9e144ecc04096bcf787a10a15fa44af682b51f0f6cce"
-
-[[package]]
-name = "i_triangle"
-version = "0.41.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7b9fb6033c4c78ab577364a29cbab4818e4bb713ce86446ccd8c3f25d98ba9c"
-dependencies = [
- "i_key_sort",
- "i_overlay",
- "i_tree",
-]
-
-[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4803,7 +4749,6 @@ name = "ranim-midi-visualizer"
 version = "0.1.2"
 dependencies = [
  "anyhow",
- "async-channel",
  "clap",
  "color",
  "eframe",
@@ -4842,11 +4787,11 @@ dependencies = [
 name = "ranim-midi-visualizer_ui"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "derive_more",
  "eframe",
  "egui-phosphor",
  "egui_dock",
- "i_triangle",
  "music-utils",
  "ordered-float",
  "ranim",
@@ -4854,6 +4799,7 @@ dependencies = [
  "ranim_music",
  "rfd",
  "structured-midi",
+ "tracing",
 ]
 
 [[package]]

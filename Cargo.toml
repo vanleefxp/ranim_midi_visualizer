@@ -10,14 +10,13 @@ description = "A MIDI visualizer that renders MIDI files into scrolling videos. 
 ranim = { workspace = true, features = ["render", "preview"] }
 anyhow = "1.0.101"
 itertools = "0.14.0"
-tracing = "0.1.44"
-tracing-indicatif = "0.3.14"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-indicatif = { workspace = true }
+tracing-subscriber = { workspace = true }
 uncased = "0.9.10"
 color = "0.3.2"
 phf = { version = "0.13.1", features = ["macros", "uncased"] }
 structured-midi = { workspace = true }
-async-channel = "2.5.0"
 web-time = "1.1.0"
 eframe = { workspace = true }
 wgpu = "27.0.1"
@@ -48,9 +47,13 @@ rfd = "0.17.2"
 num-integer = "0.1.46"
 glam = "0.32.1"
 ordered-float = "5.1.0"
+async-channel = "2.5.0"
 structured-midi = { path = "crates/structured-midi" }
 ranim_music = { path = "crates/ranim_music" }
 music-utils = { path = "crates/music-utils" }
+tracing = "0.1.44"
+tracing-indicatif = "0.3.14"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"

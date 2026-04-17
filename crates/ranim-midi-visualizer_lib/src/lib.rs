@@ -133,7 +133,7 @@ impl Default for MidiVisualizerConfig {
 
 pub fn midi_visualizer_scene(
     r: &mut RanimScene,
-    song: Arc<MidiMusic>,
+    song: &MidiMusic,
     config: &MidiVisualizerConfig,
     resolution: Resolution,
 ) {
@@ -492,7 +492,7 @@ pub fn midi_visualizer_scene(
 }
 
 pub fn render_midi_visualizer(
-    song: Arc<MidiMusic>,
+    song: &MidiMusic,
     name: &str,
     visualizer_config: &MidiVisualizerConfig,
     scene_config: &SceneConfig,
@@ -501,7 +501,7 @@ pub fn render_midi_visualizer(
 ) {
     let resolution = Resolution::new(output.width, output.height);
     let constructor = |r: &mut RanimScene| {
-        midi_visualizer_scene(r, song.clone(), visualizer_config, resolution);
+        midi_visualizer_scene(r, song, visualizer_config, resolution);
     };
     render_scene_output(
         constructor,

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use anyhow::{Ok, Result, anyhow, bail};
 use clap::{ArgMatches, Command, arg, command};
@@ -217,7 +217,7 @@ fn render(matches: &ArgMatches) -> Result<()> {
     let buf_size = matches.get_one::<String>("buffer_count").unwrap().parse()?;
 
     render_midi_visualizer(
-        Arc::new(music),
+        &music,
         name.as_str(),
         &visualizer_config,
         &scene_config,
@@ -232,10 +232,9 @@ fn preview(matches: &ArgMatches) -> Result<()> {
 
     let (music, name) = get_song_and_name(matches)?;
     let visualizer_config = get_visualizer_config(matches)?;
-    let music = Arc::new(music);
     let resolution = get_resolution(matches)?;
     let constructor = move |r: &mut RanimScene| {
-        midi_visualizer_scene(r, music.clone(), &visualizer_config, resolution);
+        midi_visualizer_scene(r, &music, &visualizer_config, resolution);
     };
     let mut app = RanimPreviewApp::new(constructor, name, get_scene_config(matches));
     app.set_resolution(resolution);
