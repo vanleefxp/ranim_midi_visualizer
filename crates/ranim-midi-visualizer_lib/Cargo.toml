@@ -6,13 +6,15 @@ edition = "2024"
 [dependencies]
 ranim = { workspace = true }
 ranim-macros = { workspace = true }
+ranim_music = { workspace = true }
+ranim-midi-visualizer_math = { workspace = true }
+
 midly = "0.5.3"
 serde = { version = "1.0.228", optional = true, features = ["serde_derive"] }
 malachite-base = "0.9.1"
 itertools = { workspace = true }
 glam = "0.30.10"
 color = "0.3.2"
-ranim_music = { workspace = true }
 structured-midi = { workspace = true }
 music-utils = { workspace = true }
 

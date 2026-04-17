@@ -5,14 +5,12 @@ use std::{
 
 use crate::{
     MidiNoteInstant, MultiTrackLoc, MultiTrackMidiNote, MultiTrackMidiNoteInstant,
-    MultiTrackPedalInstant, PedalInstant, PedalType,
-    note::MidiNote,
-    track::MidiTrack,
-    utils::func::{LadderFn, SegmentedLinearFn},
+    MultiTrackPedalInstant, PedalInstant, PedalType, note::MidiNote, track::MidiTrack,
 };
 use derive_more::{Deref, DerefMut, Index, IndexMut, IntoIterator};
 use interavl::IntervalTree;
 use itertools::Itertools as _;
+use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 
 use super::track::GenericMidiTrack;
 

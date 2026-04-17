@@ -17,8 +17,9 @@ use ranim::{
     glam::DVec2,
 };
 use ranim_midi_visualizer_lib::{
-    ColorBy, MidiVisualizerConfig, ProgressBarConfig, StatusBarConfig, cyc_index::IndexCyc,
+    ColorBy, MidiVisualizerConfig, ProgressBarConfig, StatusBarConfig,
 };
+use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 use std::{collections::HashMap, f32::consts::PI as PI_f32, ops::Range};
 use structured_midi::{MidiMusic, MultiTrackMidiNote};
 

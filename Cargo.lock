@@ -4778,9 +4778,20 @@ dependencies = [
  "music-utils",
  "ranim",
  "ranim-macros",
+ "ranim-midi-visualizer_math",
  "ranim_music",
  "serde",
  "structured-midi",
+]
+
+[[package]]
+name = "ranim-midi-visualizer_math"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "itertools",
+ "ordered-float",
+ "ranim",
 ]
 
 [[package]]
@@ -4796,6 +4807,7 @@ dependencies = [
  "ordered-float",
  "ranim",
  "ranim-midi-visualizer_lib",
+ "ranim-midi-visualizer_math",
  "ranim_music",
  "rfd",
  "structured-midi",
@@ -5707,6 +5719,7 @@ dependencies = [
  "midly",
  "ordered-float",
  "ranim",
+ "ranim-midi-visualizer_math",
  "serde",
 ]
 

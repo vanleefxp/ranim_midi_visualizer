@@ -1,9 +1,7 @@
-pub mod cyc_index;
 pub mod stroke_and_fill;
 
 use std::{ops::Range, sync::Arc};
 
-use crate::cyc_index::IndexCyc as _;
 use itertools::Itertools as _;
 use music_utils::is_black_key;
 use ranim::{
@@ -20,6 +18,7 @@ use ranim::{
     prelude::*,
     utils::rate_functions::linear,
 };
+use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 
 use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardConfig, PianoPedals};
 use structured_midi::{MidiMusic, MultiTrackLoc, MultiTrackMidiNote, MultiTrackPedalInstant};

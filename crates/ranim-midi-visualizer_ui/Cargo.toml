@@ -13,6 +13,7 @@ egui_dock = { workspace = true }
 ranim = { workspace = true }
 ranim_music = { workspace = true }
 ranim-midi-visualizer_lib = { workspace = true }
+ranim-midi-visualizer_math = { workspace = true }
 
 rfd = { workspace = true }
 structured-midi = { workspace = true }

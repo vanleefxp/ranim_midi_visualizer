@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ranim = { workspace = true }
+ranim-midi-visualizer_math = { workspace = true }
+
 midly = "0.5.3"
 serde = { version = "1.0.228", optional = true }
 itertools = { workspace = true }
 int-enum = { workspace = true }
 derive_more = { workspace = true }
-ranim = { workspace = true }
 ordered-float = { workspace = true }
 
 [dependencies.interavl]

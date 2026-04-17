@@ -1,0 +1,10 @@
+[package]
+name = "ranim-midi-visualizer_math"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ranim = { workspace = true }
+derive_more = { workspace = true }
+itertools = { workspace = true }
+ordered-float = { workspace = true }

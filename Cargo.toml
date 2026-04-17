@@ -35,6 +35,7 @@ members = [
     "crates/structured-midi",
     "crates/ranim-midi-visualizer_ui",
     "crates/music-utils",
+    "crates/ranim-midi-visualizer_math",
 ]
 
 [workspace.dependencies]
@@ -51,6 +52,7 @@ async-channel = "2.5.0"
 structured-midi = { path = "crates/structured-midi" }
 ranim_music = { path = "crates/ranim_music" }
 music-utils = { path = "crates/music-utils" }
+ranim-midi-visualizer_math = { path = "crates/ranim-midi-visualizer_math" }
 tracing = "0.1.44"
 tracing-indicatif = "0.3.14"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

@@ -9,6 +9,7 @@ use ranim::{
     cmd::{preview::Resolution, render_scene_output_with_progress},
 };
 use ranim_midi_visualizer_lib::{MidiVisualizerConfig, midi_visualizer_scene};
+use ranim_midi_visualizer_math::func::LadderFn;
 use std::{
     cell::{Ref, RefCell},
     ops::{Deref, DerefMut},
@@ -16,7 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use structured_midi::{MidiMusic, utils::func::LadderFn};
+use structured_midi::MidiMusic;
 use tracing::{error, info};
 
 #[allow(unused)]
@@ -188,6 +189,10 @@ impl MidiVisualizerAppInner2 {
     }
 
     pub fn step_frame(&mut self, n: isize) {
+        if n == 0 {
+            return;
+        }
+
         let playing = self.is_playing();
         if playing {
             self.pause();
