@@ -1,6 +1,6 @@
 pub mod stroke_and_fill;
 
-use std::{ops::Range, sync::Arc};
+use std::ops::Range;
 
 use itertools::Itertools as _;
 use music_utils::is_black_key;
@@ -99,7 +99,7 @@ pub struct MidiVisualizerConfig {
     pub progress_bar_config: ProgressBarConfig,
     pub time_window: f64,
     #[serde(skip)]
-    pub text_font: Arc<TextFont>,
+    pub text_font: TextFont,
 }
 
 impl Default for MidiVisualizerConfig {
@@ -118,14 +118,14 @@ impl Default for MidiVisualizerConfig {
             status_bar_config: Default::default(),
             progress_bar_config: Default::default(),
             time_window: 1.,
-            text_font: Arc::new(TextFont::new([
+            text_font: TextFont::new([
                 "Maple Mono NF",
                 "Cascadia Code NF",
                 "LXGW WenKai Mono",
                 "Consolas",
                 "Monaco",
                 "Courier New",
-            ])),
+            ]),
         }
     }
 }
@@ -283,7 +283,7 @@ pub fn midi_visualizer_scene(
             let src = format!("TIME {hour:02}:{min:02}:{sec:02}.{micro:03}");
 
             TextItem::new(src, font_size)
-                .with_font(font.as_ref().clone())
+                .with_font(font.clone())
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
 
@@ -313,7 +313,7 @@ pub fn midi_visualizer_scene(
         let create_note_count_text = |n: usize| {
             let src = format!("NOTE COUNT {n} / {note_count_total}");
             TextItem::new(src, font_size)
-                .with_font(font.as_ref().clone())
+                .with_font(font.clone())
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
 
@@ -334,7 +334,7 @@ pub fn midi_visualizer_scene(
         let origin = text_origin(4, 2);
         let create_nps_text = |nps: f64, nps_max: f64| {
             TextItem::new(format!("NPS (MAX) {nps:.0} ({nps_max:.0})"), font_size)
-                .with_font(font.as_ref().clone())
+                .with_font(font.clone())
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
 
@@ -363,7 +363,7 @@ pub fn midi_visualizer_scene(
         let font_size = font_size;
         let create_legato_text = move |legato_index: f64| {
             TextItem::new(format!("LEGATO {:.3}", legato_index), font_size)
-                .with_font(font.as_ref().clone())
+                .with_font(font.clone())
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
 

@@ -46,7 +46,7 @@ pub struct PianoKeyboardSize {
     /// `0.0` means the black key is perfectly centered between two white keys.
     pub black_offset: [f64; 5],
     /// Scale of note widths.
-    pub note_h_scale: (f64, f64),
+    pub note_h_scale: [f64; 2],
 }
 
 impl PianoKeyboardSize {
@@ -126,7 +126,7 @@ impl PianoKeyboardSize {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PianoKeyboardColor {
     /// Fill color of black and white keys.
-    pub key_color: (AlphaColor<Srgb>, AlphaColor<Srgb>),
+    pub key_color: [AlphaColor<Srgb>; 2],
     /// Stroke color of keys.
     pub stroke_color: AlphaColor<Srgb>,
 }
@@ -232,7 +232,7 @@ impl Default for PianoKeyboardSize {
             black_size: dvec2(0.225 / 0.35, 1.1 / 0.35),
             corner_size: dvec2(0.08 / 0.35, 0.08 / 0.35),
             black_offset: [-0.2, 0.2, -0.2, 0., 0.2],
-            note_h_scale: (0.8, 1.),
+            note_h_scale: [0.8, 1.],
         }
     }
 }
@@ -240,7 +240,7 @@ impl Default for PianoKeyboardSize {
 impl Default for PianoKeyboardColor {
     fn default() -> Self {
         Self {
-            key_color: (AlphaColor::WHITE, AlphaColor::BLACK),
+            key_color: [AlphaColor::WHITE, AlphaColor::BLACK],
             stroke_color: manim::GREY_C,
         }
     }
@@ -354,9 +354,9 @@ impl PianoKeyboard {
     ) {
         let unit = self.size_unit;
         let (key_width, h_scale) = if is_black_key(tone) {
-            (self.size.black_size.x * unit, self.size.note_h_scale.1)
+            (self.size.black_size.x * unit, self.size.note_h_scale[1])
         } else {
-            (unit, self.size.note_h_scale.0)
+            (unit, self.size.note_h_scale[0])
         };
         let origin = Tone(tone).locate(self) + ((1. - h_scale) * key_width * 0.5) * DVec3::X;
         let top_left = origin + DVec3::Y * scroll_height;
@@ -429,7 +429,7 @@ impl PianoKeyboard {
                         },
                     color:
                         PianoKeyboardColor {
-                            key_color: (white_color, black_color),
+                            key_color: [white_color, black_color],
                             stroke_color,
                         },
                     key_range:
@@ -620,7 +620,7 @@ impl PianoKeyboard {
                 PianoKeyboardConfig {
                     color:
                         PianoKeyboardColor {
-                            key_color: (white_color, black_color),
+                            key_color: [white_color, black_color],
                             ..
                         },
                     ..

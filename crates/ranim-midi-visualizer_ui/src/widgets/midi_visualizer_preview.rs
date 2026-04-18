@@ -1,24 +1,20 @@
 #![allow(non_camel_case_types)]
 
-use crate::utils::{nano_to_time_string, to_egui_color, to_egui_vec2, to_ranim_dvec2};
+use crate::utils::{
+    MidiVisualizerConfig, ProgressBarConfig, StatusBarConfig, nano_to_time_string, to_egui_vec2,
+    to_ranim_dvec2,
+};
 use eframe::{
     egui::{self, Response, Sense, Ui},
     emath::OrderedFloat,
-    epaint,
+    epaint::{self, HsvaGamma},
 };
 use music_utils::{
     KeyInfo, black_idx_to_prev_white_idx, black_tone, is_black_key, is_black_key_otone,
     key_idx_of_color, key_info, octave_range, white_idx_to_next_black_idx, white_tone,
 };
-use ranim::{
-    SceneConfig,
-    cmd::preview::Resolution,
-    color::{AlphaColor, try_color},
-    glam::DVec2,
-};
-use ranim_midi_visualizer_lib::{
-    ColorBy, MidiVisualizerConfig, ProgressBarConfig, StatusBarConfig,
-};
+use ranim::{cmd::preview::Resolution, glam::DVec2};
+use ranim_midi_visualizer_lib::ColorBy;
 use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 use std::{collections::HashMap, f32::consts::PI as PI_f32, ops::Range};
 use structured_midi::{MidiMusic, MultiTrackMidiNote};
@@ -151,11 +147,9 @@ pub struct MidiVisualizerPreview<'a> {
     /// configuration of the MIDI visualizer
     pub visualizer_config: &'a MidiVisualizerConfig,
     /// configuration of the Ranim scene
-    pub scene_config: &'a SceneConfig,
+    pub clear_color: egui::Color32,
     /// output video resolution
     pub resolution: Resolution,
-    /// Time window for calculating NPS and legato index
-    pub window: u64,
     /// current playing time in nanoseconds
     pub time: u64,
     /// cached metric data to avoid repetitive calculation
@@ -166,16 +160,14 @@ impl<'a> MidiVisualizerPreview<'a> {
     pub fn new(
         music: &'a MidiMusic,
         visualizer_config: &'a MidiVisualizerConfig,
-        scene_config: &'a SceneConfig,
+        clear_color: egui::Color32,
         resolution: Resolution,
-        window: u64,
     ) -> Self {
         Self {
             music,
             visualizer_config,
-            scene_config,
+            clear_color,
             resolution,
-            window,
             time: 0,
             cache: Default::default(),
         }
@@ -237,12 +229,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
             let p = ui.painter();
 
             // background color
-            {
-                let fill_color =
-                    try_color(&self.scene_config.clear_color).unwrap_or(AlphaColor::TRANSPARENT);
-                let fill_color = to_egui_color(fill_color);
-                p.rect_filled(rect, 0., fill_color);
-            }
+            p.rect_filled(rect, 0., self.clear_color);
 
             // status bar
             let status_bar_config = &self.visualizer_config.status_bar_config;
@@ -254,14 +241,14 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     bg_color,
                     fg_color,
                 } = status_bar_config;
-                let bg_color = to_egui_color(bg_color);
-                let fg_color = to_egui_color(fg_color);
 
                 let egui_pad_left = ranim_padding[0].x as f32 * unit;
                 let egui_pad_right = ranim_padding[1].x as f32 * unit;
                 let egui_pad_bottom = ranim_padding[1].y as f32 * unit;
                 let egui_em_size = ranim_em_size as f32 * unit;
                 let egui_content_width = egui_view_width - egui_pad_left - egui_pad_right;
+
+                let window = self.visualizer_config.time_window;
 
                 // background rectangle
                 let bg_rect = egui::Rect::from_min_size(
@@ -305,10 +292,10 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let nps = self
                     .cache
                     .nps
-                    .unwrap_or_else(|| self.music.nps(self.time, self.window));
+                    .unwrap_or_else(|| self.music.nps(self.time, window));
                 let nps_max = self.cache.nps_max.unwrap_or_else(|| {
                     self.music
-                        .nps_iter(self.window)
+                        .nps_iter(window)
                         .take_while(|&(time, _)| time <= self.time)
                         .map(|(_, nps)| f64o::from(nps))
                         .max()
@@ -318,7 +305,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let legato_index = self
                     .cache
                     .legato_index
-                    .unwrap_or_else(|| self.music.legato_index(self.time, self.window));
+                    .unwrap_or_else(|| self.music.legato_index(self.time, window));
 
                 create_text(
                     format!("TIME {}", nano_to_time_string(self.time)).as_str(),
@@ -347,8 +334,6 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     bg_color,
                 } = progress_bar_config;
                 let egui_height = ranim_height as f32 * unit;
-                let bg_color = to_egui_color(bg_color);
-                let fg_color = to_egui_color(fg_color);
 
                 let bg_rect = egui::Rect::from_min_size(
                     egui_view_top_left,
@@ -427,15 +412,11 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let egui_black_size = egui_key_unit * to_egui_vec2(keyboard_size.black_size);
                 let egui_corner_size = egui_key_unit * to_egui_vec2(keyboard_size.corner_size);
 
-                let (white_color, black_color) = keyboard_color.key_color;
-                let egui_white_color = to_egui_color(white_color);
-                let egui_black_color = to_egui_color(black_color);
+                let [white_color, black_color] = keyboard_color.key_color;
+                let stroke_color = keyboard_color.stroke_color;
 
-                let egui_stroke_color = to_egui_color(keyboard_color.stroke_color);
-
-                let egui_stroke_width =
-                    self.visualizer_config.keyboard_config.stroke_width.0 * unit;
-                let egui_stroke = epaint::PathStroke::new(egui_stroke_width, egui_stroke_color);
+                let egui_stroke_width = self.visualizer_config.keyboard_config.stroke_width * unit;
+                let egui_stroke = epaint::PathStroke::new(egui_stroke_width, stroke_color);
 
                 let egui_overlap_height = keyboard_size.black_size.y as f32 * egui_key_unit;
                 let egui_overlaps = keyboard_size.white_key_overlap_widths().map(|v| {
@@ -492,8 +473,12 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                             corner_size: egui_corner_size,
                             fill_color: highlighted_keys
                                 .get(&tone)
-                                .map(|&v| to_egui_color(v.with_alpha(white_color.components[3])))
-                                .unwrap_or_else(|| egui_white_color),
+                                .map(|&v| {
+                                    let [r, g, b, _] = v.to_array();
+                                    let a = white_color.a();
+                                    egui::Color32::from_rgba_premultiplied(r, g, b, a)
+                                })
+                                .unwrap_or_else(|| white_color),
                             stroke: egui_stroke.clone(),
                             cutoff: std::array::from_fn(|i| {
                                 if cutoff_mask[i] {
@@ -516,12 +501,11 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                             fill_color: highlighted_keys
                                 .get(&tone)
                                 .map(|&v| {
-                                    to_egui_color(
-                                        v.map_lightness(|v| v - 0.2)
-                                            .with_alpha(black_color.components[3]),
-                                    )
+                                    let mut hsva_color = HsvaGamma::from(v);
+                                    hsva_color.a = (hsva_color.a - 0.2).max(0.);
+                                    hsva_color.into()
                                 })
-                                .unwrap_or_else(|| egui_black_color),
+                                .unwrap_or_else(|| black_color),
                             stroke: egui_stroke.clone(),
                             cutoff: [None, None],
                         }
@@ -628,7 +612,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                         egui_view_top_left,
                         egui::vec2(egui_view_width, egui_scroll_height),
                     );
-                    let (white_h_scale, black_h_scale) =
+                    let [white_h_scale, black_h_scale] =
                         self.visualizer_config.keyboard_config.size.note_h_scale;
 
                     let time_to_y = |time: u64| {
@@ -666,8 +650,8 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                                 KeyColor => *note_colors.index_cyc(is_black_key(note.key) as usize),
                             }
                         }
-                        .with_alpha(note.vel as f32 / 127.);
-                        let fill_color = to_egui_color(fill_color);
+                        .to_opaque()
+                        .gamma_multiply(note.vel as f32 / 127.);
                         epaint::RectShape::filled(rect, 0., fill_color)
                     };
 

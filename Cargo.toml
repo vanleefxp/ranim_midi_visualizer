@@ -80,4 +80,5 @@ features = [
     "into_iterator",
     "from",
     "into",
+    "display",
 ]
