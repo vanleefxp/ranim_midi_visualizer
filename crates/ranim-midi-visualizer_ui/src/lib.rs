@@ -256,6 +256,7 @@ impl MidiVisualizerAppInner2 {
     }
 
     pub fn set_music(&mut self, music: MidiMusic) {
+        self.pause();
         self.music = Arc::new(music);
         self.time = 0;
         self.duration = self.music.duration();
@@ -613,22 +614,22 @@ impl eframe::App for MidiVisualizerApp {
                         .map(|(path, &tab)| (tab, path))
                         .collect::<HashMap<_, _>>();
 
-                    for tab in MidiVisualizerTab::VARIANTS {
-                        let path = opened_tabs.get(tab).map(|v| *v);
+                    for tab in MidiVisualizerTab::VARIANTS.iter().copied() {
+                        let path = opened_tabs.get(&tab).map(|v| *v);
                         let resp = ui.selectable_label(
                             path.is_some(),
                             format!("{} {}", tab.icon(), tab.title()),
                         );
                         if resp.clicked() {
                             if let Some(path) = path {
-                                if self.is_closeable(tab) {
+                                if self.is_closeable(&tab) {
                                     self.dock_state.remove_tab(path);
                                 }
                             } else {
                                 self.dock_state.main_surface_mut().split_right(
                                     egui_dock::NodeIndex::root(),
                                     0.625,
-                                    vec![*tab],
+                                    vec![tab],
                                 );
                             }
                         }

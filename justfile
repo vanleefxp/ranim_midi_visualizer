@@ -3,6 +3,6 @@ set shell := ["powershell"]
 install:
 	cargo install --path .
 
-run +args="ui":
+run *args:
 	cargo fmt
 	cargo run {{ args }}

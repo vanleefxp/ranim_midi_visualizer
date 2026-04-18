@@ -84,18 +84,12 @@ fn main() -> Result<()> {
     let mut cmd_preview = Command::new("preview");
     cmd_preview = add_common_args(cmd_preview);
 
-    let cmd_ui = Command::new("ui");
-
-    let cmd = command!()
-        .subcommand(cmd_render)
-        .subcommand(cmd_preview)
-        .subcommand(cmd_ui);
+    let cmd = command!().subcommand(cmd_render).subcommand(cmd_preview);
 
     match cmd.get_matches().subcommand() {
         Some(("render", matches)) => render(matches),
         Some(("preview", matches)) => preview(matches),
-        Some(("ui", _)) => Ok(ui()),
-        _ => Ok(()),
+        _ => Ok(ui()),
     }
 }
 
