@@ -7,6 +7,8 @@ use crate::{
 };
 use async_channel::Receiver;
 use eframe::egui::{self, Widget};
+use egui_dock::TabViewer;
+use enum_ordinalize::Ordinalize;
 use ranim::{
     Output, OutputFormat, RanimScene, SceneConfig,
     cmd::{preview::Resolution, render_scene_output_with_progress},
@@ -15,6 +17,7 @@ use ranim_midi_visualizer_lib::{ColorBy, midi_visualizer_scene};
 use ranim_midi_visualizer_math::func::LadderFn;
 use std::{
     cell::{Ref, RefCell},
+    collections::HashMap,
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
@@ -129,7 +132,7 @@ impl Default for MidiVisualizerApp {
         let mut dock_state = egui_dock::DockState::new(vec![VideoPlayback]);
         dock_state.main_surface_mut().split_right(
             egui_dock::NodeIndex::root(),
-            2. / 3.,
+            0.625,
             vec![StyleManager],
         );
         Self {
@@ -161,11 +164,28 @@ pub enum AppStatus {
     ReadingFailed(PathBuf),
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, Ordinalize)]
 #[non_exhaustive]
 pub enum MidiVisualizerTab {
     VideoPlayback,
     StyleManager,
+}
+
+const TAB_TITLES: [&str; 2] = ["Video Playback", "Style Manager"];
+const TAB_ICONS: [&str; 2] = [
+    egui_phosphor::regular::VIDEO,
+    egui_phosphor::regular::PAINT_BRUSH,
+];
+
+impl MidiVisualizerTab {
+    #[inline(always)]
+    pub fn title(&self) -> &'static str {
+        TAB_TITLES[*self as usize]
+    }
+    #[inline(always)]
+    pub fn icon(&self) -> &'static str {
+        TAB_ICONS[*self as usize]
+    }
 }
 
 impl MidiVisualizerAppInner2 {
@@ -344,12 +364,7 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
     type Tab = MidiVisualizerTab;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        use MidiVisualizerTab::*;
-        match tab {
-            VideoPlayback => format!("{} Video Playback", egui_phosphor::regular::VIDEO),
-            StyleManager => format!("{} Style Manager", egui_phosphor::regular::PAINT_BRUSH),
-        }
-        .into()
+        format!("{} {}", TAB_ICONS[*tab as usize], TAB_TITLES[*tab as usize]).into()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
@@ -380,17 +395,6 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
 impl eframe::App for MidiVisualizerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-
-        // Space bar toggles play / pause
-        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
-            self.toggle_play_pause();
-        }
-        if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-            self.step_frame(-1);
-        }
-        if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-            self.step_frame(1);
-        }
 
         // egui::Window::new("Debug")
         //     .scroll([false, true])
@@ -602,6 +606,35 @@ impl eframe::App for MidiVisualizerApp {
                     }
                 });
 
+                ui.menu_button(format!("{} View", egui_phosphor::regular::EYE), |ui| {
+                    let opened_tabs = self
+                        .dock_state
+                        .iter_all_tabs()
+                        .map(|(path, &tab)| (tab, path))
+                        .collect::<HashMap<_, _>>();
+
+                    for tab in MidiVisualizerTab::VARIANTS {
+                        let path = opened_tabs.get(tab).map(|v| *v);
+                        let resp = ui.selectable_label(
+                            path.is_some(),
+                            format!("{} {}", tab.icon(), tab.title()),
+                        );
+                        if resp.clicked() {
+                            if let Some(path) = path {
+                                if self.is_closeable(tab) {
+                                    self.dock_state.remove_tab(path);
+                                }
+                            } else {
+                                self.dock_state.main_surface_mut().split_right(
+                                    egui_dock::NodeIndex::root(),
+                                    0.625,
+                                    vec![*tab],
+                                );
+                            }
+                        }
+                    }
+                });
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // light / dark mode toggle
                     {
@@ -657,6 +690,7 @@ impl eframe::App for MidiVisualizerApp {
                     // .show_leaf_close_all_buttons(false)
                     // .show_close_buttons(false)
                     // .show_add_buttons(true)
+                    // .show_add_popup(true)
                     .show_inside(ui, &mut self.inner);
             });
     }
@@ -665,6 +699,18 @@ impl eframe::App for MidiVisualizerApp {
 impl MidiVisualizerAppInner {
     fn video_playback_ui(&mut self, ui: &mut egui::Ui) {
         ui.style_mut().visuals.code_bg_color = egui::Color32::TRANSPARENT;
+        let ctx = ui.ctx().clone();
+
+        // Space bar toggles play / pause
+        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+            self.toggle_play_pause();
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+            self.step_frame(-1);
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+            self.step_frame(1);
+        }
 
         egui::Panel::top("central_top").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
@@ -901,342 +947,359 @@ impl MidiVisualizerAppInner {
     }
 
     fn style_manager_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Playback");
-        egui::Grid::new("playback_grid").show(ui, |ui| {
-            // Scroll speed
-            {
-                let value = &mut self.inner.visualizer_config.scroll_speed;
-                ui.label("Note scroll speed: ");
-                ui.horizontal(|ui| {
-                    egui::DragValue::new(value)
-                        .range(0.1..=5.0)
-                        .speed(0.01)
-                        .max_decimals(3)
-                        .ui(ui);
-                    ui.label("Ranim units / s");
-                });
-                ui.end_row();
-            }
-
-            // Time window
-            {
-                let value = &mut self.inner.visualizer_config.time_window;
-                ui.label("Time window:");
-                ui.horizontal(|ui| {
-                    let resp = egui::DragValue::new(value)
-                        .range(100_000_000u64..=5_000_000_000)
-                        .speed(1e7)
-                        .custom_parser(|s| {
-                            let seconds: f64 = s.parse().ok()?;
-                            if seconds > 0. {
-                                Some(seconds * 1e9)
-                            } else {
-                                None
-                            }
-                        })
-                        .custom_formatter(|nanos, _| format!("{:.2}", nanos / 1e9))
-                        .update_while_editing(false)
-                        .ui(ui);
-                    if resp.drag_stopped() {
-                        self.nps_max_cache.borrow_mut().take();
-                    }
-                    ui.label("s");
-                });
-                ui.end_row();
-            }
-        });
-        ui.spacing();
-
-        ui.heading("Colors");
-        egui::Grid::new("color_grid").show(ui, |ui| {
-            // Clear color
-            {
-                ui.label("Clear color:");
-                egui::color_picker::color_edit_button_srgba(
-                    ui,
-                    &mut self.inner.clear_color,
-                    egui::color_picker::Alpha::BlendOrAdditive,
-                );
-                ui.end_row();
-            }
-
-            // Note colors
-            {
-                ui.label("Note colors:");
-                ui.horizontal(|ui| {
-                    let note_colors = &mut self.inner.visualizer_config.colors;
-                    let color_by = self.inner.visualizer_config.color_by;
-                    for (i, color) in note_colors.iter_mut().enumerate() {
-                        let mut resp = egui::color_picker::color_edit_button_srgba(
-                            ui,
-                            color,
-                            egui::color_picker::Alpha::Opaque,
-                        );
-                        use ColorBy::*;
-                        match color_by {
-                            Channel => resp = resp.on_hover_text(format!("Channel {}", i + 1)),
-                            Track => resp = resp.on_hover_text(format!("Track {}", i + 1)),
-                            KeyColor => match i {
-                                0 => resp = resp.on_hover_text("White key color"),
-                                1 => resp = resp.on_hover_text("Black key color"),
-                                _ => (),
-                            },
-                        }
-                    }
-                    ui.spacing();
-                    // [TODO] drag to swap colors, delete one specific color
-
-                    // plus button: add color
-                    {
-                        let resp = ui
-                            .button(egui_phosphor::regular::PLUS)
-                            .on_hover_text("New color");
-                        if resp.clicked() {
-                            self.visualizer_config.colors.push(egui::Color32::WHITE);
-                        }
-                    }
-
-                    // minus button: delete color
-                    {
-                        let resp = ui
-                            .add_enabled(
-                                self.visualizer_config.colors.len() > 1,
-                                egui::Button::new(egui_phosphor::regular::MINUS),
-                            )
-                            .on_hover_text("Delete last color");
-                        if resp.clicked() {
-                            self.visualizer_config.colors.pop();
-                        }
-                    }
-                });
-                ui.end_row();
-            }
-
-            // Color by
-            {
-                let color_by = self.inner.visualizer_config.color_by;
-                let color_by_text = |color_by: ColorBy| match color_by {
-                    ColorBy::Channel => "Channel",
-                    ColorBy::Track => "Track",
-                    ColorBy::KeyColor => "White / black key",
-                };
-
-                ui.label("Note colors by:");
-                egui::ComboBox::from_id_salt("color_by_combo")
-                    .selected_text(color_by_text(color_by))
-                    .show_ui(ui, |ui| {
-                        use ColorBy::*;
-                        let color_by = &mut self.inner.visualizer_config.color_by;
-                        for value in [Channel, Track, KeyColor] {
-                            ui.selectable_value(color_by, value, color_by_text(value));
-                        }
-                    });
-                ui.end_row();
-            }
-
-            // Key colors
-            {
-                ui.label("Key colors:");
-                ui.horizontal(|ui| {
-                    let keyboard_color = &mut self.visualizer_config.keyboard_config.color;
-                    for (color, text) in keyboard_color
-                        .key_color
-                        .iter_mut()
-                        .zip(["White key color", "Black key color"])
-                    {
-                        egui::color_picker::color_edit_button_srgba(
-                            ui,
-                            color,
-                            egui::color_picker::Alpha::BlendOrAdditive,
-                        )
-                        .on_hover_text(text);
-                    }
-                    ui.spacing();
-                    egui::color_picker::color_edit_button_srgba(
-                        ui,
-                        &mut keyboard_color.stroke_color,
-                        egui::color_picker::Alpha::BlendOrAdditive,
-                    )
-                    .on_hover_text("Stroke color");
-                });
-                ui.end_row();
-            }
-
-            // Status bar color
-            {
-                let status_bar_config = &mut self.visualizer_config.status_bar_config;
-                ui.label("Status bar colors: ");
-                ui.horizontal(|ui| {
-                    egui::color_picker::color_edit_button_srgba(
-                        ui,
-                        &mut status_bar_config.fg_color,
-                        egui::color_picker::Alpha::BlendOrAdditive,
-                    )
-                    .on_hover_text("Foreground color");
-                    egui::color_picker::color_edit_button_srgba(
-                        ui,
-                        &mut status_bar_config.bg_color,
-                        egui::color_picker::Alpha::BlendOrAdditive,
-                    )
-                    .on_hover_text("Background color");
-                });
-                ui.end_row();
-            }
-
-            // Progress bar color
-            {
-                let progress_bar_config = &mut self.visualizer_config.progress_bar_config;
-                ui.label("Progress bar colors: ");
-                ui.horizontal(|ui| {
-                    egui::color_picker::color_edit_button_srgba(
-                        ui,
-                        &mut progress_bar_config.fg_color,
-                        egui::color_picker::Alpha::BlendOrAdditive,
-                    )
-                    .on_hover_text("Text color");
-                    egui::color_picker::color_edit_button_srgba(
-                        ui,
-                        &mut progress_bar_config.bg_color,
-                        egui::color_picker::Alpha::BlendOrAdditive,
-                    )
-                    .on_hover_text("Background color");
-                });
-                ui.end_row();
-            }
-        });
-        ui.spacing();
-
-        ui.heading("Size");
-        egui::Grid::new("size_grid").show(ui, |ui| {
-            {
-                let piano_keyboard_size = &mut self.inner.visualizer_config.keyboard_config.size;
-
-                // Key size
+        egui::CollapsingHeader::new(
+            egui::RichText::new(format!("{} Playback", egui_phosphor::regular::VIDEO_CAMERA))
+                .heading(),
+        )
+        .id_salt("playback_collapsible")
+        .default_open(true)
+        .show(ui, |ui| {
+            egui::Grid::new("playback_grid").show(ui, |ui| {
+                // Scroll speed
                 {
-                    ui.label("Key size: ");
+                    let value = &mut self.inner.visualizer_config.scroll_speed;
+                    ui.label("Note scroll speed: ");
                     ui.horizontal(|ui| {
-                        egui::DragValue::new(&mut piano_keyboard_size.white_height)
-                            .range(0.0..=5.0)
+                        egui::DragValue::new(value)
+                            .range(0.1..=5.0)
                             .speed(0.01)
                             .max_decimals(3)
-                            .ui(ui)
-                            .on_hover_text("White key height");
-                        egui::DragValue::new(&mut piano_keyboard_size.black_size.x)
-                            .range(0.5..=1.0)
-                            .speed(0.01)
-                            .max_decimals(3)
-                            .ui(ui)
-                            .on_hover_text("Black key width");
-                        egui::DragValue::new(&mut piano_keyboard_size.black_size.y)
-                            .range(0.0..=piano_keyboard_size.white_height)
-                            .speed(0.01)
-                            .max_decimals(2)
-                            .ui(ui)
-                            .on_hover_text("Black key height");
+                            .ui(ui);
+                        ui.label("Ranim units / s");
                     });
-                    ui.end_row();
-                    ui.label("");
-                    ui.label("Unit: white key width");
                     ui.end_row();
                 }
 
-                // Black key offset
+                // Time window
                 {
-                    let black_offset = &mut piano_keyboard_size.black_offset;
-                    ui.label("Black key offset: ");
+                    let value = &mut self.inner.visualizer_config.time_window;
+                    ui.label("Time window:");
                     ui.horizontal(|ui| {
-                        for value in black_offset.iter_mut() {
-                            egui::DragValue::new(value)
-                                .range(-1.0..=1.0)
-                                .speed(0.01)
-                                .max_decimals(3)
-                                .ui(ui);
+                        let resp = egui::DragValue::new(value)
+                            .range(100_000_000u64..=5_000_000_000)
+                            .speed(1e7)
+                            .custom_parser(|s| {
+                                let seconds: f64 = s.parse().ok()?;
+                                if seconds > 0. {
+                                    Some(seconds * 1e9)
+                                } else {
+                                    None
+                                }
+                            })
+                            .custom_formatter(|nanos, _| format!("{:.2}", nanos / 1e9))
+                            .update_while_editing(false)
+                            .ui(ui);
+                        if resp.drag_stopped() {
+                            self.nps_max_cache.borrow_mut().take();
                         }
+                        ui.label("s");
+                    });
+                    ui.end_row();
+                }
+            });
+        });
+
+        egui::CollapsingHeader::new(
+            egui::RichText::new(format!("{} Colors", egui_phosphor::regular::PALETTE)).heading(),
+        )
+        .default_open(true)
+        .show(ui, |ui| {
+            egui::Grid::new("color_grid").show(ui, |ui| {
+                // Clear color
+                {
+                    ui.label("Clear color:");
+                    egui::color_picker::color_edit_button_srgba(
+                        ui,
+                        &mut self.inner.clear_color,
+                        egui::color_picker::Alpha::BlendOrAdditive,
+                    );
+                    ui.end_row();
+                }
+
+                // Note colors
+                {
+                    ui.label("Note colors:");
+                    ui.horizontal(|ui| {
+                        let note_colors = &mut self.inner.visualizer_config.colors;
+                        let color_by = self.inner.visualizer_config.color_by;
+                        for (i, color) in note_colors.iter_mut().enumerate() {
+                            let mut resp = egui::color_picker::color_edit_button_srgba(
+                                ui,
+                                color,
+                                egui::color_picker::Alpha::Opaque,
+                            );
+                            use ColorBy::*;
+                            match color_by {
+                                Channel => resp = resp.on_hover_text(format!("Channel {}", i + 1)),
+                                Track => resp = resp.on_hover_text(format!("Track {}", i + 1)),
+                                KeyColor => match i {
+                                    0 => resp = resp.on_hover_text("White key color"),
+                                    1 => resp = resp.on_hover_text("Black key color"),
+                                    _ => (),
+                                },
+                            }
+                        }
+                        ui.spacing();
+                        // [TODO] drag to swap colors, delete one specific color
+
+                        // plus button: add color
                         {
                             let resp = ui
-                                .button(egui_phosphor::regular::FLIP_HORIZONTAL)
-                                .on_hover_text("Make symmetric");
+                                .button(egui_phosphor::regular::PLUS)
+                                .on_hover_text("New color");
                             if resp.clicked() {
-                                black_offset[1] = -black_offset[0];
-                                black_offset[4] = -black_offset[2];
+                                self.visualizer_config.colors.push(egui::Color32::WHITE);
+                            }
+                        }
+
+                        // minus button: delete color
+                        {
+                            let resp = ui
+                                .add_enabled(
+                                    self.visualizer_config.colors.len() > 1,
+                                    egui::Button::new(egui_phosphor::regular::MINUS),
+                                )
+                                .on_hover_text("Delete last color");
+                            if resp.clicked() {
+                                self.visualizer_config.colors.pop();
                             }
                         }
                     });
                     ui.end_row();
-                    ui.label("");
-                    ui.label("Unit: black key half width");
+                }
+
+                // Color by
+                {
+                    let color_by = self.inner.visualizer_config.color_by;
+                    let color_by_text = |color_by: ColorBy| match color_by {
+                        ColorBy::Channel => "Channel",
+                        ColorBy::Track => "Track",
+                        ColorBy::KeyColor => "White / black key",
+                    };
+
+                    ui.label("Note colors by:");
+                    egui::ComboBox::from_id_salt("color_by_combo")
+                        .selected_text(color_by_text(color_by))
+                        .show_ui(ui, |ui| {
+                            use ColorBy::*;
+                            let color_by = &mut self.inner.visualizer_config.color_by;
+                            for value in [Channel, Track, KeyColor] {
+                                ui.selectable_value(color_by, value, color_by_text(value));
+                            }
+                        });
                     ui.end_row();
                 }
 
-                // Note horizontal scale
+                // Key colors
                 {
-                    let note_h_scale = &mut piano_keyboard_size.note_h_scale;
-                    ui.label("Note horizontal scale: ");
+                    ui.label("Key colors:");
                     ui.horizontal(|ui| {
-                        for (value, text) in note_h_scale.iter_mut().zip(["White key", "Black key"])
-                        {
-                            egui::DragValue::new(value)
-                                .range(0.0..=1.0)
-                                .speed(0.01)
-                                .max_decimals(3)
-                                .ui(ui)
-                                .on_hover_text(text);
-                        }
-                    });
-                    ui.end_row();
-                }
-
-                let status_bar_config = &mut self.visualizer_config.status_bar_config;
-
-                // Status bar padding
-                {
-                    ui.label("Status bar padding: ");
-                    ui.horizontal(|ui| {
-                        for (value, text) in status_bar_config
-                            .padding
+                        let keyboard_color = &mut self.visualizer_config.keyboard_config.color;
+                        for (color, text) in keyboard_color
+                            .key_color
                             .iter_mut()
-                            .map(|v| [&mut v.x, &mut v.y])
-                            .flatten()
-                            .zip(["Left", "Bottom", "Right", "Top"])
+                            .zip(["White key color", "Black key color"])
                         {
-                            egui::DragValue::new(value)
-                                .range(0.0..=status_bar_config.em_size)
-                                .speed(0.01)
-                                .max_decimals(3)
-                                .ui(ui)
-                                .on_hover_text(text);
+                            egui::color_picker::color_edit_button_srgba(
+                                ui,
+                                color,
+                                egui::color_picker::Alpha::BlendOrAdditive,
+                            )
+                            .on_hover_text(text);
                         }
+                        ui.spacing();
+                        egui::color_picker::color_edit_button_srgba(
+                            ui,
+                            &mut keyboard_color.stroke_color,
+                            egui::color_picker::Alpha::BlendOrAdditive,
+                        )
+                        .on_hover_text("Stroke color");
                     });
                     ui.end_row();
                 }
 
-                // Status bar font size
+                // Status bar color
                 {
-                    ui.label("Status bar font size: ");
-                    egui::DragValue::new(&mut status_bar_config.em_size)
-                        .range(0.0..=0.5)
-                        .speed(0.01)
-                        .max_decimals(3)
-                        .ui(ui);
+                    let status_bar_config = &mut self.visualizer_config.status_bar_config;
+                    ui.label("Status bar colors: ");
+                    ui.horizontal(|ui| {
+                        egui::color_picker::color_edit_button_srgba(
+                            ui,
+                            &mut status_bar_config.fg_color,
+                            egui::color_picker::Alpha::BlendOrAdditive,
+                        )
+                        .on_hover_text("Foreground color");
+                        egui::color_picker::color_edit_button_srgba(
+                            ui,
+                            &mut status_bar_config.bg_color,
+                            egui::color_picker::Alpha::BlendOrAdditive,
+                        )
+                        .on_hover_text("Background color");
+                    });
                     ui.end_row();
                 }
 
-                // progress bar height
+                // Progress bar color
                 {
                     let progress_bar_config = &mut self.visualizer_config.progress_bar_config;
-                    ui.label("Progress bar height: ");
-                    egui::DragValue::new(&mut progress_bar_config.height)
-                        .range(0.0..=0.5)
-                        .speed(0.01)
-                        .max_decimals(3)
-                        .ui(ui);
+                    ui.label("Progress bar colors: ");
+                    ui.horizontal(|ui| {
+                        egui::color_picker::color_edit_button_srgba(
+                            ui,
+                            &mut progress_bar_config.fg_color,
+                            egui::color_picker::Alpha::BlendOrAdditive,
+                        )
+                        .on_hover_text("Text color");
+                        egui::color_picker::color_edit_button_srgba(
+                            ui,
+                            &mut progress_bar_config.bg_color,
+                            egui::color_picker::Alpha::BlendOrAdditive,
+                        )
+                        .on_hover_text("Background color");
+                    });
                     ui.end_row();
                 }
+            });
+        });
 
-                ui.label("");
-                ui.label("Unit: Ranim coordinate unit (video height = 8)");
-                ui.end_row();
-            }
+        egui::CollapsingHeader::new(
+            egui::RichText::new(format!("{} Size", egui_phosphor::regular::RULER)).heading(),
+        )
+        .default_open(true)
+        .show(ui, |ui| {
+            egui::Grid::new("size_grid").show(ui, |ui| {
+                {
+                    let piano_keyboard_size =
+                        &mut self.inner.visualizer_config.keyboard_config.size;
+
+                    // Key size
+                    {
+                        ui.label("Key size: ");
+                        ui.horizontal(|ui| {
+                            egui::DragValue::new(&mut piano_keyboard_size.white_height)
+                                .range(0.0..=5.0)
+                                .speed(0.01)
+                                .max_decimals(3)
+                                .ui(ui)
+                                .on_hover_text("White key height");
+                            egui::DragValue::new(&mut piano_keyboard_size.black_size.x)
+                                .range(0.5..=1.0)
+                                .speed(0.01)
+                                .max_decimals(3)
+                                .ui(ui)
+                                .on_hover_text("Black key width");
+                            egui::DragValue::new(&mut piano_keyboard_size.black_size.y)
+                                .range(0.0..=piano_keyboard_size.white_height)
+                                .speed(0.01)
+                                .max_decimals(2)
+                                .ui(ui)
+                                .on_hover_text("Black key height");
+                        });
+                        ui.end_row();
+                        ui.label("");
+                        ui.label("Unit: white key width");
+                        ui.end_row();
+                    }
+
+                    // Black key offset
+                    {
+                        let black_offset = &mut piano_keyboard_size.black_offset;
+                        ui.label("Black key offset: ");
+                        ui.horizontal(|ui| {
+                            for value in black_offset.iter_mut() {
+                                egui::DragValue::new(value)
+                                    .range(-1.0..=1.0)
+                                    .speed(0.01)
+                                    .max_decimals(3)
+                                    .ui(ui);
+                            }
+                            {
+                                let resp = ui
+                                    .button(egui_phosphor::regular::FLIP_HORIZONTAL)
+                                    .on_hover_text("Make symmetric");
+                                if resp.clicked() {
+                                    black_offset[1] = -black_offset[0];
+                                    black_offset[4] = -black_offset[2];
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("");
+                        ui.label("Unit: black key half width");
+                        ui.end_row();
+                    }
+
+                    // Note horizontal scale
+                    {
+                        let note_h_scale = &mut piano_keyboard_size.note_h_scale;
+                        ui.label("Note horizontal scale: ");
+                        ui.horizontal(|ui| {
+                            for (value, text) in
+                                note_h_scale.iter_mut().zip(["White key", "Black key"])
+                            {
+                                egui::DragValue::new(value)
+                                    .range(0.0..=1.0)
+                                    .speed(0.01)
+                                    .max_decimals(3)
+                                    .ui(ui)
+                                    .on_hover_text(text);
+                            }
+                        });
+                        ui.end_row();
+                    }
+
+                    let status_bar_config = &mut self.visualizer_config.status_bar_config;
+
+                    // Status bar padding
+                    {
+                        ui.label("Status bar padding: ");
+                        ui.horizontal(|ui| {
+                            for (value, text) in status_bar_config
+                                .padding
+                                .iter_mut()
+                                .map(|v| [&mut v.x, &mut v.y])
+                                .flatten()
+                                .zip(["Left", "Bottom", "Right", "Top"])
+                            {
+                                egui::DragValue::new(value)
+                                    .range(0.0..=status_bar_config.em_size)
+                                    .speed(0.01)
+                                    .max_decimals(3)
+                                    .ui(ui)
+                                    .on_hover_text(text);
+                            }
+                        });
+                        ui.end_row();
+                    }
+
+                    // Status bar font size
+                    {
+                        ui.label("Status bar font size: ");
+                        egui::DragValue::new(&mut status_bar_config.em_size)
+                            .range(0.0..=0.5)
+                            .speed(0.01)
+                            .max_decimals(3)
+                            .ui(ui);
+                        ui.end_row();
+                    }
+
+                    // progress bar height
+                    {
+                        let progress_bar_config = &mut self.visualizer_config.progress_bar_config;
+                        ui.label("Progress bar height: ");
+                        egui::DragValue::new(&mut progress_bar_config.height)
+                            .range(0.0..=0.5)
+                            .speed(0.01)
+                            .max_decimals(3)
+                            .ui(ui);
+                        ui.end_row();
+                    }
+
+                    ui.label("");
+                    ui.label("Unit: Ranim coordinate unit (video height = 8)");
+                    ui.end_row();
+                }
+            });
         });
     }
 }
@@ -1294,3 +1357,14 @@ pub fn run_app(app: MidiVisualizerApp, #[cfg(target_arch = "wasm32")] container_
         });
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////

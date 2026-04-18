@@ -4804,6 +4804,7 @@ dependencies = [
  "eframe",
  "egui-phosphor",
  "egui_dock",
+ "enum-ordinalize",
  "music-utils",
  "ordered-float",
  "ranim",

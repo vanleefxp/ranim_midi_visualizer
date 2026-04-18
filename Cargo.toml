@@ -15,7 +15,7 @@ tracing-indicatif = { workspace = true }
 tracing-subscriber = { workspace = true }
 uncased = "0.9.10"
 color = "0.3.2"
-phf = { version = "0.13.1", features = ["macros", "uncased"] }
+phf = { workspace = true }
 structured-midi = { workspace = true }
 web-time = "1.1.0"
 eframe = { workspace = true }
@@ -39,23 +39,29 @@ members = [
 ]
 
 [workspace.dependencies]
-itertools = "0.14.0"
-int-enum = "1.2.0"
 eframe = "0.34.1"
 egui_dock = "0.19.1"
 egui-phosphor = "0.12.0"
+egui_tiles = "0.15.0"
+
+tracing = "0.1.44"
+tracing-indicatif = "0.3.14"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+
+ranim_music = { path = "crates/ranim_music" }
+ranim-midi-visualizer_math = { path = "crates/ranim-midi-visualizer_math" }
+
+itertools = "0.14.0"
+int-enum = "1.2.0"
 rfd = "0.17.2"
 num-integer = "0.1.46"
 glam = "0.32.1"
 ordered-float = "5.1.0"
 async-channel = "2.5.0"
 structured-midi = { path = "crates/structured-midi" }
-ranim_music = { path = "crates/ranim_music" }
 music-utils = { path = "crates/music-utils" }
-ranim-midi-visualizer_math = { path = "crates/ranim-midi-visualizer_math" }
-tracing = "0.1.44"
-tracing-indicatif = "0.3.14"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+phf = { version = "0.13.1", features = ["macros", "uncased"] }
+enum-ordinalize = "4.3.2"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
