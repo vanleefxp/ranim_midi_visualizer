@@ -502,7 +502,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                                 .get(&tone)
                                 .map(|&v| {
                                     let mut hsva_color = HsvaGamma::from(v);
-                                    hsva_color.a = (hsva_color.a - 0.2).max(0.);
+                                    hsva_color.v = (hsva_color.v - 0.2).max(0.);
                                     hsva_color.into()
                                 })
                                 .unwrap_or_else(|| black_color),

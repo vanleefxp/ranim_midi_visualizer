@@ -6,8 +6,8 @@ use crate::{
     widgets::MidiVisualizerPreview,
 };
 use async_channel::Receiver;
-use eframe::egui::{self, Widget};
-use egui_dock::TabViewer;
+use eframe::egui::{self, Widget as _};
+use egui_dock::TabViewer as _;
 use enum_ordinalize::Ordinalize;
 use ranim::{
     Output, OutputFormat, RanimScene, SceneConfig,
@@ -60,7 +60,6 @@ pub struct MidiVisualizerAppInner2 {
     playback_speed: f64,
 
     // Export
-    export_dialog_open: bool,
     export_config: Output,
     export_progress_rx: Option<Receiver<ExportProgress>>,
     export_progress: (u64, u64),
@@ -82,7 +81,6 @@ impl Default for MidiVisualizerAppInner2 {
             duration: 0,
             playback_speed: 1.0,
 
-            export_dialog_open: false,
             export_config: Default::default(),
             export_progress_rx: None,
             export_progress: (0, 0),
@@ -96,6 +94,8 @@ pub struct MidiVisualizerAppInner {
     /// cache for NPS max function
     nps_max_cache: RefCell<Option<LadderFn<u64, f64>>>,
     note_count_cache: RefCell<Option<LadderFn<u64, usize>>>,
+    added_tab: RefCell<Option<(MidiVisualizerTab, egui_dock::NodePath)>>,
+    visible_tabs: RefCell<HashMap<MidiVisualizerTab, egui_dock::NodePath>>,
 }
 
 impl Deref for MidiVisualizerAppInner {
@@ -117,6 +117,8 @@ impl Default for MidiVisualizerAppInner {
             inner: Default::default(),
             nps_max_cache: Default::default(),
             note_count_cache: Default::default(),
+            added_tab: Default::default(),
+            visible_tabs: Default::default(),
         }
     }
 }
@@ -128,17 +130,13 @@ pub struct MidiVisualizerApp {
 
 impl Default for MidiVisualizerApp {
     fn default() -> Self {
-        use MidiVisualizerTab::*;
-        let mut dock_state = egui_dock::DockState::new(vec![VideoPlayback]);
-        dock_state.main_surface_mut().split_right(
-            egui_dock::NodeIndex::root(),
-            0.625,
-            vec![StyleManager],
-        );
-        Self {
+        let value = Self {
             inner: Default::default(),
-            dock_state,
-        }
+            dock_state: Self::default_dock_state(),
+        };
+        value.update_visible_tabs();
+
+        value
     }
 }
 
@@ -168,13 +166,16 @@ pub enum AppStatus {
 #[non_exhaustive]
 pub enum MidiVisualizerTab {
     VideoPlayback,
-    StyleManager,
+    StyleSettings,
+    OutputSettings,
 }
 
-const TAB_TITLES: [&str; 2] = ["Video Playback", "Style Manager"];
-const TAB_ICONS: [&str; 2] = [
+const TAB_TITLES: [&str; MidiVisualizerTab::VARIANT_COUNT] =
+    ["Video Playback", "Style Settings", "Output Settings"];
+const TAB_ICONS: [&str; MidiVisualizerTab::VARIANT_COUNT] = [
     egui_phosphor::regular::VIDEO,
     egui_phosphor::regular::PAINT_BRUSH,
+    egui_phosphor::regular::FILE_VIDEO,
 ];
 
 impl MidiVisualizerTab {
@@ -207,6 +208,10 @@ impl MidiVisualizerAppInner2 {
 
     pub fn is_playing(&self) -> bool {
         self.play_start_t.is_some()
+    }
+
+    pub fn is_exporting(&self) -> bool {
+        self.export_progress_rx.is_some()
     }
 
     pub fn toggle_play_pause(&mut self) {
@@ -365,14 +370,15 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
     type Tab = MidiVisualizerTab;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        format!("{} {}", TAB_ICONS[*tab as usize], TAB_TITLES[*tab as usize]).into()
+        format!("{} {}", tab.icon(), tab.title()).into()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         use MidiVisualizerTab::*;
         match *tab {
             VideoPlayback => self.video_playback_ui(ui),
-            StyleManager => self.style_manager_ui(ui),
+            StyleSettings => self.style_settings_ui(ui),
+            OutputSettings => self.output_settings_ui(ui),
         }
     }
 
@@ -389,6 +395,22 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
         match tab {
             VideoPlayback => false,
             _ => true,
+        }
+    }
+
+    fn on_add(&mut self, _path: egui_dock::NodePath) {}
+
+    fn add_popup(&mut self, ui: &mut egui::Ui, node_path: egui_dock::NodePath) {
+        let mut visible_tabs = self.visible_tabs.borrow_mut();
+        for tab in MidiVisualizerTab::VARIANTS.iter().copied() {
+            let path = visible_tabs.get(&tab).map(|v| *v);
+            if path.is_none() {
+                let resp = ui.selectable_label(false, format!("{} {}", tab.icon(), tab.title()));
+                if resp.clicked() {
+                    visible_tabs.insert(tab, node_path);
+                    self.added_tab.replace(Some((tab, node_path)));
+                }
+            }
         }
     }
 }
@@ -444,137 +466,47 @@ impl eframe::App for MidiVisualizerApp {
             }
 
             // export dialog
-            let exporting = self.export_progress_rx.is_some();
-            if self.export_dialog_open || exporting {
+            if self.is_exporting() {
                 egui::Window::new("Export")
                     .id(egui::Id::new("export_window"))
                     .collapsible(false)
                     .max_width(300.)
+                    .title_bar(false)
+                    .resizable(false)
                     .show(ui, |ui| {
-                        ui.add_enabled_ui(!exporting, |ui| {
-                            egui::Grid::new("export_grid")
-                                .num_columns(2)
-                                .show(ui, |ui| {
-                                    ui.label("Save to:");
-                                    if ui.button("Choose").clicked() {
-                                        let mut fd = rfd::FileDialog::new()
-                                            .add_filter("MP4", &["mp4"])
-                                            .add_filter("WEBM", &["webm"])
-                                            .add_filter("MOV", &["mov"])
-                                            .add_filter("GIF", &["gif"])
-                                            .set_title("Save video");
-
-                                        {
-                                            use AppStatus::*;
-                                            match &self.status {
-                                                FileOpened(path) => {
-                                                    if let Some(parent) = path.parent() {
-                                                        fd = fd.set_directory(parent);
-                                                    }
-                                                    if let Some(filename) = path.file_stem()
-                                                        && let Some(filename) = filename.to_str()
-                                                    {
-                                                        fd = fd.set_file_name(filename);
-                                                    }
-                                                }
-                                                _ => (),
-                                            }
-                                        }
-
-                                        let path = fd.save_file();
-                                        if let Some(path) = path
-                                            && let Some(ext) = path.extension()
-                                            && let Some(ext) = ext.to_str()
-                                        {
-                                            self.export_config.format = {
-                                                let ext = ext.to_lowercase();
-                                                use OutputFormat::*;
-                                                match ext.as_str() {
-                                                    "mp4" => Mp4,
-                                                    "webm" => Webm,
-                                                    "mov" => Mov,
-                                                    "gif" => Gif,
-                                                    _ => unreachable!(),
-                                                }
-                                            };
-                                            if let Some(filename) = path.file_stem()
-                                                && let Some(filename) = filename.to_str()
-                                            {
-                                                self.export_config.name =
-                                                    Some(filename.to_string());
-                                            }
-                                            self.export_config.dir = path
-                                                .parent()
-                                                .map(|v| v.display().to_string())
-                                                .unwrap_or_else(|| ".".to_string());
-                                        }
-                                    }
-
-                                    ui.label(format!(
-                                        "{}/{}_{}x{}_{}.{}",
-                                        self.export_config.dir,
-                                        self.export_config
-                                            .name
-                                            .as_ref()
-                                            .map(|v| v.as_str())
-                                            .unwrap_or(""),
-                                        self.export_config.width,
-                                        self.export_config.height,
-                                        self.export_config.fps,
-                                        self.export_config.format,
-                                    ));
-                                });
-                            // Show progress bar inline when exporting
-                            if exporting {
-                                let (current, total) = self.export_progress;
-                                if total > 0 {
-                                    let progress = current as f32 / total as f32;
-                                    ui.add(egui::ProgressBar::new(progress).text(format!(
-                                        "{current}/{total} frames ({:.0}%)",
-                                        progress * 100.0
-                                    )));
-                                } else {
-                                    ui.horizontal(|ui| {
-                                        ui.spinner();
-                                        ui.label("Preparing...");
-                                    });
-                                }
-                            } else if ui.button("Start Export").clicked() {
-                                self.start_export(ctx.clone());
-                            }
-                        }); // end add_enabled_ui
+                        ui.horizontal(|ui| {
+                            ui.label("Exporting to:");
+                            ui.code(format!(
+                                "{}/{}_{}x{}_{}.{}",
+                                self.export_config.dir,
+                                self.export_config
+                                    .name
+                                    .as_ref()
+                                    .map(|v| v.as_str())
+                                    .unwrap_or(""),
+                                self.export_config.width,
+                                self.export_config.height,
+                                self.export_config.fps,
+                                self.export_config.format,
+                            ));
+                        });
+                        let (current, total) = self.export_progress;
+                        if total > 0 {
+                            let progress = current as f32 / total as f32;
+                            egui::ProgressBar::new(progress)
+                                .text(format!(
+                                    "{current}/{total} frames ({:.0}%)",
+                                    progress * 100.0
+                                ))
+                                .ui(ui);
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label("Preparing...");
+                            });
+                        }
                     });
             }
-        }
-
-        // resolution dialog
-        if self.resolution_dialog_open {
-            egui::Window::new("Resolution")
-                .id(egui::Id::new("resolution_window"))
-                .collapsible(false)
-                .max_width(100.)
-                .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        egui::Grid::new("resolution_grid")
-                            .num_columns(1)
-                            .show(ui, |ui| {
-                                ui.label("Width:");
-                                egui::DragValue::new(&mut self.export_config.width)
-                                    .update_while_editing(false)
-                                    .range(1..=7680)
-                                    .ui(ui);
-                                ui.end_row();
-                                ui.label("Height:");
-                                egui::DragValue::new(&mut self.export_config.height)
-                                    .update_while_editing(false)
-                                    .range(1..=4320)
-                                    .ui(ui);
-                            });
-                        if ui.button("OK").clicked() {
-                            self.resolution_dialog_open = false;
-                        }
-                    })
-                });
         }
 
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
@@ -600,10 +532,63 @@ impl eframe::App for MidiVisualizerApp {
                         }
                     }
                     if ui
-                        .button(format!("{} Export", egui_phosphor::regular::EXPORT))
+                        .add_enabled(
+                            !self.is_exporting(),
+                            egui::Button::new(format!("{} Export", egui_phosphor::regular::EXPORT)),
+                        )
                         .clicked()
                     {
-                        self.export_dialog_open = true;
+                        let mut fd = rfd::FileDialog::new()
+                            .add_filter("MP4", &["mp4"])
+                            .add_filter("WEBM", &["webm"])
+                            .add_filter("MOV", &["mov"])
+                            .add_filter("GIF", &["gif"])
+                            .set_title("Save video");
+
+                        {
+                            use AppStatus::*;
+                            match &self.status {
+                                FileOpened(path) => {
+                                    if let Some(parent) = path.parent() {
+                                        fd = fd.set_directory(parent);
+                                    }
+                                    if let Some(filename) = path.file_stem()
+                                        && let Some(filename) = filename.to_str()
+                                    {
+                                        fd = fd.set_file_name(filename);
+                                    }
+                                }
+                                _ => (),
+                            }
+                        }
+
+                        let path = fd.save_file();
+                        if let Some(path) = path
+                            && let Some(ext) = path.extension()
+                            && let Some(ext) = ext.to_str()
+                        {
+                            self.export_config.format = {
+                                let ext = ext.to_lowercase();
+                                use OutputFormat::*;
+                                match ext.as_str() {
+                                    "mp4" => Mp4,
+                                    "webm" => Webm,
+                                    "mov" => Mov,
+                                    "gif" => Gif,
+                                    _ => unreachable!(),
+                                }
+                            };
+                            if let Some(filename) = path.file_stem()
+                                && let Some(filename) = filename.to_str()
+                            {
+                                self.export_config.name = Some(filename.to_string());
+                            }
+                            self.export_config.dir = path
+                                .parent()
+                                .map(|v| v.display().to_string())
+                                .unwrap_or_else(|| ".".to_string());
+                            self.start_export(ctx.clone());
+                        }
                     }
                 });
 
@@ -634,7 +619,45 @@ impl eframe::App for MidiVisualizerApp {
                             }
                         }
                     }
+                    ui.separator();
+                    if ui
+                        .button(format!(
+                            "{} Revert to default",
+                            egui_phosphor::regular::ERASER
+                        ))
+                        .clicked()
+                    {
+                        self.dock_state = Self::default_dock_state();
+                        self.update_visible_tabs();
+                    }
                 });
+
+                ui.menu_button(
+                    format!("{} Style", egui_phosphor::regular::PAINT_BRUSH),
+                    |ui| {
+                        if ui
+                            .button(format!(
+                                "{} Save style",
+                                egui_phosphor::regular::FLOPPY_DISK
+                            ))
+                            .clicked()
+                        {
+                            // [TODO] save style
+                        }
+                        ui.separator();
+                        if ui
+                            .button(format!(
+                                "{} Revert to default",
+                                egui_phosphor::regular::ERASER
+                            ))
+                            .clicked()
+                        {
+                            // [TODO] confirm first
+                            self.export_config = Output::default();
+                            self.visualizer_config = MidiVisualizerConfig::default();
+                        }
+                    },
+                );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // light / dark mode toggle
@@ -686,13 +709,22 @@ impl eframe::App for MidiVisualizerApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(0))
             .show_inside(ui, |ui| {
+                let num_visible_tabs = self.visible_tabs.borrow().len();
+                let show_add_popup = num_visible_tabs < MidiVisualizerTab::VARIANT_COUNT;
+
                 egui_dock::DockArea::new(&mut self.dock_state)
                     .show_leaf_collapse_buttons(false)
-                    // .show_leaf_close_all_buttons(false)
-                    // .show_close_buttons(false)
-                    // .show_add_buttons(true)
-                    // .show_add_popup(true)
+                    .show_add_buttons(show_add_popup)
+                    .show_add_popup(show_add_popup)
                     .show_inside(ui, &mut self.inner);
+
+                if let Some((tab, path)) = self.added_tab.take() {
+                    self.dock_state.set_focused_node_and_surface(path);
+                    self.dock_state.push_to_focused_leaf(tab);
+                }
+
+                self.update_visible_tabs();
+                // [TODO] only update visible tabs when needed
             });
     }
 }
@@ -712,84 +744,6 @@ impl MidiVisualizerAppInner {
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
             self.step_frame(1);
         }
-
-        egui::Panel::top("central_top").show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                // resolution selector
-                {
-                    ui.label("Resolution: ");
-                    let resolution = self.resolution();
-                    egui::ComboBox::from_id_salt("resolution_combo")
-                        .selected_text(format!(
-                            "{}×{} ({})",
-                            resolution.width,
-                            resolution.height,
-                            resolution.aspect_ratio_str()
-                        ))
-                        .show_ui(ui, |ui| {
-                            // 16:9
-                            ui.label(egui::RichText::new("16:9").strong());
-
-                            let mut resolution_select_value =
-                                |ui: &mut egui::Ui, selected_value: Resolution, text: &str| {
-                                    let resolution = self.resolution();
-                                    let mut resp =
-                                        ui.selectable_label(resolution == selected_value, text);
-                                    if resp.clicked() && resolution != selected_value {
-                                        self.export_config.width = selected_value.width;
-                                        self.export_config.height = selected_value.height;
-                                        resp.mark_changed();
-                                    }
-                                    resp
-                                };
-
-                            resolution_select_value(ui, Resolution::HD, "1280×720 (HD)");
-                            resolution_select_value(ui, Resolution::FHD, "1920×1080 (FHD)");
-                            resolution_select_value(ui, Resolution::QHD, "2560×1440 (QHD)");
-                            resolution_select_value(ui, Resolution::UHD, "3840×2160 (UHD)");
-                            ui.separator();
-                            // 16:10
-                            ui.label(egui::RichText::new("16:10").strong());
-                            resolution_select_value(ui, Resolution::WXGA, "1280×800 (WXGA)");
-                            resolution_select_value(ui, Resolution::WUXGA, "1920×1200 (WUXGA)");
-                            ui.separator();
-                            // 4:3
-                            ui.label(egui::RichText::new("4:3").strong());
-                            resolution_select_value(ui, Resolution::SVGA, "800×600 (SVGA)");
-                            resolution_select_value(ui, Resolution::XGA, "1024×768 (XGA)");
-                            resolution_select_value(ui, Resolution::SXGA, "1280×960 (SXGA)");
-                            ui.separator();
-                            // 1:1
-                            ui.label(egui::RichText::new("1:1").strong());
-                            resolution_select_value(ui, Resolution::_1K_SQUARE, "1080×1080");
-                            resolution_select_value(ui, Resolution::_2K_SQUARE, "2160×2160");
-                            ui.separator();
-                            // 21:9
-                            ui.label(egui::RichText::new("21:9").strong());
-                            resolution_select_value(ui, Resolution::UW_QHD, "3440×1440 (UW-QHD)");
-                            ui.separator();
-                            if ui
-                                .selectable_label(false, "Custom")
-                                .on_hover_text("Open resolution dialog")
-                                .clicked()
-                            {
-                                self.resolution_dialog_open = true;
-                            }
-                        });
-                }
-                ui.spacing();
-
-                // FPS edit
-                {
-                    ui.label("Output FPS:");
-                    egui::DragValue::new(&mut self.export_config.fps)
-                        .range(1u32..=240)
-                        .update_while_editing(false)
-                        .ui(ui);
-                }
-                ui.spacing();
-            });
-        });
 
         egui::Panel::bottom("playback_control").show_inside(ui, |ui| {
             // Playback control
@@ -947,7 +901,7 @@ impl MidiVisualizerAppInner {
         });
     }
 
-    fn style_manager_ui(&mut self, ui: &mut egui::Ui) {
+    fn style_settings_ui(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new(
             egui::RichText::new(format!("{} Playback", egui_phosphor::regular::VIDEO_CAMERA))
                 .heading(),
@@ -968,6 +922,9 @@ impl MidiVisualizerAppInner {
                             .ui(ui);
                         ui.label("Ranim units / s");
                     });
+                    ui.end_row();
+                    ui.label("");
+                    ui.label("video height = 8 Ranim units");
                     ui.end_row();
                 }
 
@@ -1297,11 +1254,128 @@ impl MidiVisualizerAppInner {
                     }
 
                     ui.label("");
-                    ui.label("Unit: Ranim coordinate unit (video height = 8)");
+                    ui.label("Unit: Ranim unit");
                     ui.end_row();
                 }
             });
         });
+    }
+
+    fn output_settings_ui(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new("output_grid").show(ui, |ui| {
+            // Resolution
+            {
+                ui.label("Resolution: ");
+                let resolution = self.resolution();
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("resolution_combo")
+                        .selected_text(format!(
+                            "{}×{} ({})",
+                            resolution.width,
+                            resolution.height,
+                            resolution.aspect_ratio_str()
+                        ))
+                        .show_ui(ui, |ui| {
+                            // 16:9
+                            ui.label(egui::RichText::new("16:9").strong());
+
+                            let mut resolution_select_value =
+                                |ui: &mut egui::Ui, selected_value: Resolution, text: &str| {
+                                    let resolution = self.resolution();
+                                    let mut resp =
+                                        ui.selectable_label(resolution == selected_value, text);
+                                    if resp.clicked() && resolution != selected_value {
+                                        self.export_config.width = selected_value.width;
+                                        self.export_config.height = selected_value.height;
+                                        resp.mark_changed();
+                                    }
+                                    resp
+                                };
+
+                            resolution_select_value(ui, Resolution::HD, "1280×720 (HD)");
+                            resolution_select_value(ui, Resolution::FHD, "1920×1080 (FHD)");
+                            resolution_select_value(ui, Resolution::QHD, "2560×1440 (QHD)");
+                            resolution_select_value(ui, Resolution::UHD, "3840×2160 (UHD)");
+                            ui.separator();
+                            // 16:10
+                            ui.label(egui::RichText::new("16:10").strong());
+                            resolution_select_value(ui, Resolution::WXGA, "1280×800 (WXGA)");
+                            resolution_select_value(ui, Resolution::WUXGA, "1920×1200 (WUXGA)");
+                            ui.separator();
+                            // 4:3
+                            ui.label(egui::RichText::new("4:3").strong());
+                            resolution_select_value(ui, Resolution::SVGA, "800×600 (SVGA)");
+                            resolution_select_value(ui, Resolution::XGA, "1024×768 (XGA)");
+                            resolution_select_value(ui, Resolution::SXGA, "1280×960 (SXGA)");
+                            ui.separator();
+                            // 1:1
+                            ui.label(egui::RichText::new("1:1").strong());
+                            resolution_select_value(ui, Resolution::_1K_SQUARE, "1080×1080");
+                            resolution_select_value(ui, Resolution::_2K_SQUARE, "2160×2160");
+                            ui.separator();
+                            // 21:9
+                            ui.label(egui::RichText::new("21:9").strong());
+                            resolution_select_value(ui, Resolution::UW_QHD, "3440×1440 (UW-QHD)");
+                            ui.separator();
+                            if ui
+                                .selectable_label(false, "Custom")
+                                .on_hover_text("Open resolution dialog")
+                                .clicked()
+                            {
+                                self.resolution_dialog_open = true;
+                            }
+                        });
+                });
+                ui.end_row();
+                ui.label("");
+                ui.horizontal(|ui| {
+                    egui::DragValue::new(&mut self.export_config.width)
+                        .update_while_editing(false)
+                        .range(1..=7680)
+                        .ui(ui)
+                        .on_hover_text("Width (px)");
+                    egui::DragValue::new(&mut self.export_config.height)
+                        .update_while_editing(false)
+                        .range(1..=4320)
+                        .ui(ui)
+                        .on_hover_text("Height (px)");
+                });
+            }
+            ui.end_row();
+
+            // FPS
+            {
+                let value = &mut self.export_config.fps;
+                ui.label("Output FPS:");
+                egui::DragValue::new(value)
+                    .range(1u32..=240)
+                    .update_while_editing(false)
+                    .ui(ui);
+            }
+            ui.end_row();
+        });
+    }
+}
+
+impl MidiVisualizerApp {
+    fn default_dock_state() -> egui_dock::DockState<MidiVisualizerTab> {
+        use MidiVisualizerTab::*;
+        let mut dock_state = egui_dock::DockState::new(vec![VideoPlayback]);
+        let surface = dock_state.main_surface_mut();
+        let [_, right_node] =
+            surface.split_right(egui_dock::NodeIndex::root(), 0.625, vec![StyleSettings]);
+        surface.split_below(right_node, 0.75, vec![OutputSettings]);
+        dock_state
+    }
+
+    fn update_visible_tabs(&self) {
+        let mut visible_tabs = self.visible_tabs.borrow_mut();
+        visible_tabs.clear();
+        visible_tabs.extend(
+            self.dock_state
+                .iter_all_tabs()
+                .map(|(path, &tab)| (tab, path.node_path())),
+        );
     }
 }
 
@@ -1368,4 +1442,4 @@ pub fn run_app(app: MidiVisualizerApp, #[cfg(target_arch = "wasm32")] container_
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////
