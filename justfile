@@ -6,3 +6,7 @@ install:
 run *args:
 	cargo fmt
 	cargo run {{ args }}
+
+build:
+	cargo fmt
+	cargo build --release
