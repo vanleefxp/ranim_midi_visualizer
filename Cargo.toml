@@ -1,10 +1,16 @@
-[package]
-name = "ranim-midi-visualizer"
-version = "0.1.2"
+[workspace.package]
 edition = "2024"
 authors = ["F.X.P. <litran39@hotmail.com>"]
 license = "MIT"
+version = "0.1.2"
+
+[package]
+name = "ranim-midi-visualizer"
 description = "A MIDI visualizer that renders MIDI files into scrolling videos. Powered by Rust and Ranim."
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
 
 [dependencies]
 ranim = { workspace = true, features = ["render", "preview"] }
@@ -17,9 +23,7 @@ uncased = "0.9.10"
 color = "0.3.2"
 phf = { workspace = true }
 structured-midi = { workspace = true }
-web-time = "1.1.0"
 eframe = { workspace = true }
-wgpu = "27.0.1"
 ranim-midi-visualizer_lib = { workspace = true }
 ranim-midi-visualizer_ui = { path = "crates/ranim-midi-visualizer_ui" }
 
@@ -31,7 +35,6 @@ features = ["cargo", "color"]
 members = [
     "crates/ranim_music",
     "crates/ranim-midi-visualizer_lib",
-    # "crates/ranim_path_bool",
     "crates/structured-midi",
     "crates/ranim-midi-visualizer_ui",
     "crates/music-utils",
@@ -62,6 +65,8 @@ structured-midi = { path = "crates/structured-midi" }
 music-utils = { path = "crates/music-utils" }
 phf = { version = "0.13.1", features = ["macros", "uncased"] }
 enum-ordinalize = "4.3.2"
+serde = { version = "1.0.228", features = ["serde_derive"] }
+toml = "1.1.2"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"

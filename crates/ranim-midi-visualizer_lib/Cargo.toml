@@ -1,7 +1,9 @@
 [package]
 name = "ranim-midi-visualizer_lib"
-version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
 
 [dependencies]
 ranim = { workspace = true }
@@ -10,7 +12,7 @@ ranim_music = { workspace = true }
 ranim-midi-visualizer_math = { workspace = true }
 
 midly = "0.5.3"
-serde = { version = "1.0.228", optional = true, features = ["serde_derive"] }
+serde = { workspace = true, optional = true, features = ["serde_derive"] }
 malachite-base = "0.9.1"
 itertools = { workspace = true }
 glam = "0.30.10"

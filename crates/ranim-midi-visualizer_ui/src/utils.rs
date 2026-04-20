@@ -8,7 +8,7 @@ use ranim::{
     color::{AlphaColor, Rgba8, Srgb},
     core::{components::width::Width, num::Integer as _},
     glam::{DVec2, dvec2},
-    items::vitem::text::TextFont,
+    items::vitem::text::TextFont as RanimTextFont,
 };
 use ranim_midi_visualizer_lib::{
     ColorBy, MidiVisualizerConfig as RanimMidiVisualizerConfig,
@@ -74,7 +74,7 @@ pub fn ranim_color_to_hex_string(color: AlphaColor<Srgb>) -> String {
     format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PianoKeyboardColor {
     /// Fill color of black and white keys.
     pub key_color: [egui::Color32; 2],
@@ -82,7 +82,7 @@ pub struct PianoKeyboardColor {
     pub stroke_color: egui::Color32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PianoKeyboardConfig {
     /// Size of the piano keyboard.
     pub size: PianoKeyboardSize,
@@ -94,7 +94,7 @@ pub struct PianoKeyboardConfig {
     pub stroke_width: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatusBarConfig {
     /// font size unit
     pub em_size: f64,
@@ -106,7 +106,7 @@ pub struct StatusBarConfig {
     pub fg_color: egui::Color32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProgressBarConfig {
     /// height of the progress bar
     pub height: f64,
@@ -116,7 +116,7 @@ pub struct ProgressBarConfig {
     pub bg_color: egui::Color32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MidiVisualizerConfig {
     pub colors: Vec<egui::Color32>,
     pub scroll_speed: f64,
@@ -126,7 +126,8 @@ pub struct MidiVisualizerConfig {
     pub status_bar_config: StatusBarConfig,
     pub progress_bar_config: ProgressBarConfig,
     pub time_window: u64,
-    pub text_font: TextFont,
+    #[serde(skip)] // [TODO] make this field savable
+    pub text_font: RanimTextFont,
 }
 
 impl From<RanimPianoKeyboardColor> for PianoKeyboardColor {

@@ -18,6 +18,7 @@ use ranim_midi_visualizer_math::func::LadderFn;
 use std::{
     cell::{Ref, RefCell},
     collections::HashMap,
+    io::Write,
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
@@ -267,7 +268,6 @@ impl MidiVisualizerAppInner2 {
         self.duration = self.music.duration();
     }
 
-    #[allow(unused)]
     fn start_export(&mut self, ctx: egui::Context) {
         let (progress_tx, progress_rx) = async_channel::unbounded();
         self.export_progress_rx = Some(progress_rx);
@@ -323,6 +323,100 @@ impl MidiVisualizerAppInner2 {
         Resolution {
             width: self.export_config.width,
             height: self.export_config.height,
+        }
+    }
+
+    fn show_open_dialog(&mut self) {
+        let opened_file = rfd::FileDialog::new()
+            .add_filter("MIDI files", &["mid", "midi"])
+            .pick_file();
+        if let Some(path) = &opened_file {
+            // load music
+            if let Ok(src) = std::fs::read(path)
+                && let Ok(music) = MidiMusic::try_from(src.as_slice())
+            {
+                self.set_music(music);
+                self.status = AppStatus::FileOpened(path.clone());
+            } else {
+                self.status = AppStatus::ReadingFailed(path.clone());
+            }
+        }
+    }
+
+    fn show_export_dialog(&mut self, ctx: egui::Context) {
+        let mut fd = rfd::FileDialog::new()
+            .add_filter("MP4", &["mp4"])
+            .add_filter("WEBM", &["webm"])
+            .add_filter("MOV", &["mov"])
+            .add_filter("GIF", &["gif"])
+            .set_title("Save video");
+
+        {
+            use AppStatus::*;
+            match &self.status {
+                FileOpened(path) => {
+                    if let Some(parent) = path.parent() {
+                        fd = fd.set_directory(parent);
+                    }
+                    if let Some(filename) = path.file_stem()
+                        && let Some(filename) = filename.to_str()
+                    {
+                        fd = fd.set_file_name(filename);
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        let path = fd.save_file();
+        if let Some(path) = path
+            && let Some(ext) = path.extension()
+            && let Some(ext) = ext.to_str()
+        {
+            self.export_config.format = {
+                let ext = ext.to_lowercase();
+                use OutputFormat::*;
+                match ext.as_str() {
+                    "mp4" => Mp4,
+                    "webm" => Webm,
+                    "mov" => Mov,
+                    "gif" => Gif,
+                    _ => unreachable!(),
+                }
+            };
+            if let Some(filename) = path.file_stem()
+                && let Some(filename) = filename.to_str()
+            {
+                self.export_config.name = Some(filename.to_string());
+            }
+            self.export_config.dir = path
+                .parent()
+                .map(|v| v.display().to_string())
+                .unwrap_or_else(|| ".".to_string());
+            self.start_export(ctx);
+        }
+    }
+
+    fn show_load_style_dialog(&mut self) {
+        let fd = rfd::FileDialog::new().add_filter("Style config file", &["toml"]);
+        if let Some(path) = fd.pick_file()
+            && let Ok(src) = std::fs::read_to_string(&path)
+            && let Ok(config) = toml::de::from_str(&src)
+        {
+            // [TODO] handle errors
+            self.visualizer_config = config;
+        }
+    }
+
+    fn show_save_style_dialog(&mut self) {
+        // [TODO] confirm that the file does not exist
+        let fd = rfd::FileDialog::new().add_filter("Style config file", &["toml"]);
+        if let Some(path) = fd.save_file()
+            && let Ok(src) = toml::ser::to_string_pretty(&self.visualizer_config)
+            && let Ok(mut file) = std::fs::File::create(&path)
+        {
+            // [TODO] handle errors
+            let _ = file.write_all(src.as_bytes());
         }
     }
 }
@@ -516,20 +610,7 @@ impl eframe::App for MidiVisualizerApp {
                         .button(format!("{} Open", egui_phosphor::regular::FOLDER_OPEN))
                         .clicked()
                     {
-                        let opened_file = rfd::FileDialog::new()
-                            .add_filter("MIDI files", &["mid", "midi"])
-                            .pick_file();
-                        if let Some(path) = &opened_file {
-                            // load music
-                            if let Ok(src) = std::fs::read(path)
-                                && let Ok(music) = MidiMusic::try_from(src.as_slice())
-                            {
-                                self.set_music(music);
-                                self.status = AppStatus::FileOpened(path.clone());
-                            } else {
-                                self.status = AppStatus::ReadingFailed(path.clone());
-                            }
-                        }
+                        self.show_open_dialog();
                     }
                     if ui
                         .add_enabled(
@@ -538,57 +619,7 @@ impl eframe::App for MidiVisualizerApp {
                         )
                         .clicked()
                     {
-                        let mut fd = rfd::FileDialog::new()
-                            .add_filter("MP4", &["mp4"])
-                            .add_filter("WEBM", &["webm"])
-                            .add_filter("MOV", &["mov"])
-                            .add_filter("GIF", &["gif"])
-                            .set_title("Save video");
-
-                        {
-                            use AppStatus::*;
-                            match &self.status {
-                                FileOpened(path) => {
-                                    if let Some(parent) = path.parent() {
-                                        fd = fd.set_directory(parent);
-                                    }
-                                    if let Some(filename) = path.file_stem()
-                                        && let Some(filename) = filename.to_str()
-                                    {
-                                        fd = fd.set_file_name(filename);
-                                    }
-                                }
-                                _ => (),
-                            }
-                        }
-
-                        let path = fd.save_file();
-                        if let Some(path) = path
-                            && let Some(ext) = path.extension()
-                            && let Some(ext) = ext.to_str()
-                        {
-                            self.export_config.format = {
-                                let ext = ext.to_lowercase();
-                                use OutputFormat::*;
-                                match ext.as_str() {
-                                    "mp4" => Mp4,
-                                    "webm" => Webm,
-                                    "mov" => Mov,
-                                    "gif" => Gif,
-                                    _ => unreachable!(),
-                                }
-                            };
-                            if let Some(filename) = path.file_stem()
-                                && let Some(filename) = filename.to_str()
-                            {
-                                self.export_config.name = Some(filename.to_string());
-                            }
-                            self.export_config.dir = path
-                                .parent()
-                                .map(|v| v.display().to_string())
-                                .unwrap_or_else(|| ".".to_string());
-                            self.start_export(ctx.clone());
-                        }
+                        self.show_export_dialog(ctx.clone());
                     }
                 });
 
@@ -635,6 +666,7 @@ impl eframe::App for MidiVisualizerApp {
                 ui.menu_button(
                     format!("{} Style", egui_phosphor::regular::PAINT_BRUSH),
                     |ui| {
+                        // Save style
                         if ui
                             .button(format!(
                                 "{} Save style",
@@ -642,9 +674,23 @@ impl eframe::App for MidiVisualizerApp {
                             ))
                             .clicked()
                         {
-                            // [TODO] save style
+                            self.show_save_style_dialog();
                         }
+
+                        // Load style
+                        if ui
+                            .button(format!(
+                                "{} Load style",
+                                egui_phosphor::regular::FOLDER_OPEN
+                            ))
+                            .clicked()
+                        {
+                            self.show_load_style_dialog();
+                        }
+
                         ui.separator();
+
+                        // Revert style to default
                         if ui
                             .button(format!(
                                 "{} Revert to default",
@@ -1442,4 +1488,4 @@ pub fn run_app(app: MidiVisualizerApp, #[cfg(target_arch = "wasm32")] container_
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////
+//////////////////////////////////////////
