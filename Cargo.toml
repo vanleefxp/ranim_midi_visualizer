@@ -46,6 +46,7 @@ eframe = "0.34.1"
 egui_dock = "0.19.1"
 egui-phosphor = "0.12.0"
 egui_tiles = "0.15.0"
+egui_dialogs = { git = "https://github.com/vanleefxp/egui-dialogs_fork.git" }
 
 tracing = "0.1.44"
 tracing-indicatif = "0.3.14"

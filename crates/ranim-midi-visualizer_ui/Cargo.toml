@@ -10,6 +10,7 @@ version.workspace = true
 eframe = { workspace = true, features = ["persistence"] }
 egui-phosphor = { workspace = true }
 egui_dock = { workspace = true }
+egui_dialogs = { workspace = true }
 
 # Ranim series
 ranim = { workspace = true }

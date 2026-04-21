@@ -1525,6 +1525,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_dialogs"
+version = "0.3.8"
+source = "git+https://github.com/vanleefxp/egui-dialogs_fork.git#88c69665a08d137c3e363a0d1461a9e1cede51b2"
+dependencies = [
+ "egui",
+ "sys-locale",
+]
+
+[[package]]
 name = "egui_dock"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4704,6 +4713,7 @@ dependencies = [
  "derive_more",
  "eframe",
  "egui-phosphor",
+ "egui_dialogs",
  "egui_dock",
  "enum-ordinalize",
  "music-utils",
@@ -5742,6 +5752,15 @@ dependencies = [
  "thiserror 2.0.18",
  "walkdir",
  "yaml-rust",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

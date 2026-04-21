@@ -18,7 +18,6 @@ use ranim_midi_visualizer_math::func::LadderFn;
 use std::{
     cell::{Ref, RefCell},
     collections::HashMap,
-    io::Write,
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
@@ -329,16 +328,25 @@ impl MidiVisualizerAppInner2 {
     fn show_open_dialog(&mut self) {
         let opened_file = rfd::FileDialog::new()
             .add_filter("MIDI files", &["mid", "midi"])
+            .add_filter("All files", &["*"])
             .pick_file();
         if let Some(path) = &opened_file {
             // load music
-            if let Ok(src) = std::fs::read(path)
-                && let Ok(music) = MidiMusic::try_from(src.as_slice())
-            {
-                self.set_music(music);
-                self.status = AppStatus::FileOpened(path.clone());
-            } else {
-                self.status = AppStatus::ReadingFailed(path.clone());
+            match std::fs::read(path) {
+                Ok(src) => match MidiMusic::try_from(src.as_slice()) {
+                    Ok(music) => {
+                        self.set_music(music);
+                        self.status = AppStatus::FileOpened(path.clone());
+                    }
+                    Err(err) => {
+                        self.status = AppStatus::ReadingFailed(path.clone());
+                        self.show_error_dialog(err);
+                    }
+                },
+                Err(err) => {
+                    self.status = AppStatus::ReadingFailed(path.clone());
+                    self.show_error_dialog(err);
+                }
             }
         }
     }
@@ -398,26 +406,58 @@ impl MidiVisualizerAppInner2 {
     }
 
     fn show_load_style_dialog(&mut self) {
-        let fd = rfd::FileDialog::new().add_filter("Style config file", &["toml"]);
-        if let Some(path) = fd.pick_file()
-            && let Ok(src) = std::fs::read_to_string(&path)
-            && let Ok(config) = toml::de::from_str(&src)
-        {
-            // [TODO] handle errors
-            self.visualizer_config = config;
+        let fd = rfd::FileDialog::new()
+            .add_filter("Style config file", &["toml"])
+            .add_filter("All files", &["*"]);
+        if let Some(path) = fd.pick_file() {
+            match std::fs::read_to_string(&path) {
+                Ok(src) => match toml::de::from_str(&src) {
+                    Ok(config) => self.visualizer_config = config,
+                    Err(err) => self.show_error_dialog(err),
+                },
+                Err(err) => self.show_error_dialog(err),
+            }
         }
     }
 
-    fn show_save_style_dialog(&mut self) {
-        // [TODO] confirm that the file does not exist
-        let fd = rfd::FileDialog::new().add_filter("Style config file", &["toml"]);
-        if let Some(path) = fd.save_file()
-            && let Ok(src) = toml::ser::to_string_pretty(&self.visualizer_config)
-            && let Ok(mut file) = std::fs::File::create(&path)
-        {
-            // [TODO] handle errors
-            let _ = file.write_all(src.as_bytes());
+    fn show_save_style_dialog(&self) {
+        let fd = rfd::FileDialog::new()
+            .add_filter("Style config file", &["toml"])
+            .add_filter("All files", &["*"]);
+        if let Some(path) = fd.save_file() {
+            match toml::ser::to_string_pretty(&self.visualizer_config) {
+                Ok(src) => match std::fs::write(&path, src) {
+                    Ok(_) => (),
+                    Err(err) => self.show_error_dialog(err),
+                },
+                Err(err) => self.show_error_dialog(err),
+            }
         }
+    }
+
+    fn show_revert_style_dialog(&mut self) {
+        let reply = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .set_title("Revert to default")
+            .set_description("All current styles will be lost. Do you want to proceed?")
+            .show();
+        match reply {
+            rfd::MessageDialogResult::Yes => {
+                self.export_config = Output::default();
+                self.visualizer_config = MidiVisualizerConfig::default();
+            }
+            _ => (),
+        }
+    }
+
+    fn show_error_dialog(&self, err: impl ToString) {
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("Error")
+            .set_description(err.to_string())
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
     }
 }
 
@@ -698,9 +738,7 @@ impl eframe::App for MidiVisualizerApp {
                             ))
                             .clicked()
                         {
-                            // [TODO] confirm first
-                            self.export_config = Output::default();
-                            self.visualizer_config = MidiVisualizerConfig::default();
+                            self.show_revert_style_dialog();
                         }
                     },
                 );
@@ -721,9 +759,9 @@ impl eframe::App for MidiVisualizerApp {
                         };
                         if ui.button(button_text).on_hover_text(tooltip).clicked() {
                             if dark_mode {
-                                ctx.set_visuals(egui::Visuals::light());
+                                ctx.set_theme(egui::Theme::Light);
                             } else {
-                                ctx.set_visuals(egui::Visuals::dark());
+                                ctx.set_theme(egui::Theme::Dark);
                             }
                         }
                     }
