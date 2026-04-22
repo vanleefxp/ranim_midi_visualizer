@@ -12,7 +12,9 @@ use crate::{
     widgets::MidiVisualizerPreview,
 };
 use async_channel::Receiver;
-use eframe::egui::{self, Widget as _};
+use cpal::traits::{DeviceTrait, HostTrait};
+use derivative::Derivative;
+use eframe::egui::{self, FontData, Widget as _};
 use egui_dock::TabViewer as _;
 use enum_ordinalize::Ordinalize;
 use ranim::{
@@ -26,7 +28,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 use structured_midi::MidiMusic;
@@ -40,6 +42,14 @@ enum ExportProgress {
     Error(String),
 }
 
+pub(crate) static AUDIO_DEVICES: LazyLock<Vec<cpal::Device>> = LazyLock::new(|| {
+    let host = cpal::default_host();
+    // output devices only
+    host.devices()
+        .map(|v| v.filter(|v| v.supports_output()).collect())
+        .unwrap_or_default()
+});
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MidiVisualizerAppCache {
     /// cache for NPS max function
@@ -51,11 +61,14 @@ pub(crate) struct MidiVisualizerAppCache {
     synth: RefCell<Option<Arc<Mutex<Synthesizer>>>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
 pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) midi_file: Option<PathBuf>,
     pub(crate) soundfont_file: Option<PathBuf>,
     pub(crate) synth_settings: SynthesizerSettings,
+    #[derivative(Debug = "ignore")]
+    pub(crate) audio_device_idx: isize,
 
     /// the displaying MIDI music
     pub(crate) music: Arc<MidiMusic>,
@@ -1016,9 +1029,47 @@ impl MidiVisualizerAppInner {
 
     fn audio_settings_ui(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("audio_grid").show(ui, |ui| {
+            // Audio device
+            {
+                ui.label("Audio device:");
+                let value = &mut self.inner.audio_device_idx;
+                let get_device_name = |device: &cpal::Device| {
+                    device
+                        .description()
+                        .ok()
+                        .map(|v| v.name().to_string())
+                        .unwrap_or_else(|| "Unknown device".to_string())
+                };
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("audio_device_combo")
+                        .selected_text(
+                            AUDIO_DEVICES
+                                .get(*value as usize)
+                                .map(get_device_name)
+                                .unwrap_or_else(|| "(None)".to_string()),
+                        )
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(value, -1, "(None)");
+                            for (idx, device) in AUDIO_DEVICES.iter().enumerate() {
+                                ui.selectable_value(value, idx as isize, get_device_name(device));
+                            }
+                        });
+                    {
+                        let resp = ui.add_enabled(
+                            *value >= 0,
+                            egui::Button::new(egui_phosphor::regular::HEADPHONES),
+                        );
+                        if resp.clicked() {
+                            // [TODO] test audio device by playing a 440 Hz sine wave
+                        }
+                    }
+                });
+                ui.end_row();
+            }
+
             // Soundfont
             {
-                ui.label("Soundfont:");
+                ui.label("Soundfont: ");
                 ui.horizontal(|ui| {
                     if ui.button(egui_phosphor::regular::FOLDER_OPEN).clicked() {
                         self.show_load_soundfont_dialog();
@@ -1039,12 +1090,9 @@ impl MidiVisualizerAppInner {
                 ui.end_row();
             }
 
-            // ui.label("Audio device:");
-            // ui.end_row();
-
             // Sample rate
             {
-                ui.label("Sample rate:");
+                ui.label("Sample rate: ");
                 let value = &mut self.synth_settings.sample_rate;
                 const COMMON_SAMPLE_RATES: [u32; 12] = [
                     8000, 11025, 16000, 22050, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
@@ -1235,7 +1283,19 @@ impl MidiVisualizerApp {
 pub fn run_app(app: MidiVisualizerApp, #[cfg(target_arch = "wasm32")] container_id: String) {
     let build_app = |cc: &eframe::CreationContext| {
         let mut fonts = egui::FontDefinitions::default();
+
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        fonts.font_data.insert(
+            "resource-han-sans".to_string(),
+            FontData::from_static(include_bytes!("../assets/ResourceHanRoundedCN-Regular.ttf"))
+                .into(),
+        );
+        fonts
+            .families
+            .get_mut(&eframe::egui::FontFamily::Proportional)
+            .unwrap()
+            .push("resource-han-sans".to_string());
+
         cc.egui_ctx.set_fonts(fonts);
         Ok(Box::new(app) as Box<dyn eframe::App>)
     };
@@ -1295,4 +1355,14 @@ pub fn run_app(app: MidiVisualizerApp, #[cfg(target_arch = "wasm32")] container_
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////                                                                                                                                                                                                                                                                                                     
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////

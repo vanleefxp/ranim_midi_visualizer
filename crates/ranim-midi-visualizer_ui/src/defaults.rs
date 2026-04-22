@@ -9,6 +9,7 @@ impl Default for MidiVisualizerAppInner2 {
             midi_file: None,
             soundfont_file: None,
             synth_settings: SynthesizerSettings::new(44100),
+            audio_device_idx: 0,
 
             music: Default::default(),
             soundfont: None,

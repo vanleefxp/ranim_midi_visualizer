@@ -11,7 +11,8 @@ use rustysynth::{SoundFont, Synthesizer};
 use structured_midi::MidiMusic;
 
 use crate::{
-    MidiVisualizerApp, MidiVisualizerAppInner, MidiVisualizerAppInner2, utils::MidiVisualizerConfig,
+    AUDIO_DEVICES, MidiVisualizerApp, MidiVisualizerAppInner, MidiVisualizerAppInner2,
+    utils::MidiVisualizerConfig,
 };
 
 // Getters
@@ -33,6 +34,10 @@ impl MidiVisualizerAppInner2 {
             width: self.export_config.width,
             height: self.export_config.height,
         }
+    }
+
+    pub(crate) fn audio_device(&self) -> Option<&cpal::Device> {
+        AUDIO_DEVICES.get(self.audio_device_idx as usize)
     }
 }
 
@@ -134,6 +139,11 @@ impl MidiVisualizerApp {
     #[inline(always)]
     pub fn note_count_total(&self) -> usize {
         self.inner.note_count_total()
+    }
+
+    #[inline(always)]
+    pub fn audio_device(&self) -> Option<&cpal::Device> {
+        self.inner.audio_device()
     }
 
     /// MIDI soundfont synthesizer, if there is any.

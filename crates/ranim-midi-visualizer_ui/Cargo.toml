@@ -21,6 +21,7 @@ ranim-midi-visualizer_math = { workspace = true }
 rfd = { workspace = true }
 structured-midi = { workspace = true }
 derive_more = { workspace = true }
+derivative = { workspace = true }
 music-utils = { workspace = true }
 # i_triangle = { version = "0.41.0", features = ["glam"] }
 ordered-float = { workspace = true }
@@ -30,3 +31,4 @@ enum-ordinalize = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true, features = ["serde"] }
 rustysynth = { workspace = true }
+cpal = { workspace = true }
