@@ -1,7 +1,13 @@
 mod utils;
 pub mod widgets;
 
+mod defaults;
+mod deref;
+mod getters_and_setters;
+mod tabs;
+
 use crate::{
+    tabs::MidiVisualizerTab,
     utils::{MidiVisualizerConfig, egui_color_to_hex_string, nano_to_time_string},
     widgets::MidiVisualizerPreview,
 };
@@ -17,9 +23,8 @@ use ranim_midi_visualizer_lib::{ColorBy, midi_visualizer_scene};
 use ranim_midi_visualizer_math::func::LadderFn;
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use std::{
-    cell::{Ref, RefCell},
+    cell::RefCell,
     collections::HashMap,
-    ops::{Deref, DerefMut},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -35,94 +40,57 @@ enum ExportProgress {
     Error(String),
 }
 
-#[derive(Clone, Debug)]
-pub struct MidiVisualizerAppInner2 {
-    midi_file: Option<PathBuf>,
-    soundfont_file: Option<PathBuf>,
-    synth_settings: SynthesizerSettings,
-    synth: Option<Arc<Mutex<Synthesizer>>>,
-
-    /// the displaying MIDI music
-    pub music: Arc<MidiMusic>,
-    /// soundfont for playing MIDI notes
-    pub soundfont: Option<Arc<SoundFont>>,
-
-    /// configuration of the MIDI visualizer
-    pub visualizer_config: MidiVisualizerConfig,
-    /// scene clear color
-    pub clear_color: egui::Color32,
-    /// current playing time in nanoseconds
-    pub time: u64,
-    pub looping: bool,
-    /// absolute time corresponding to the start of music
-    ///
-    /// When "play" button is clicked, this value is set to the instant of now minus the song's current playing time.
-    pub play_start_t: Option<Instant>,
-
-    /// time window for calculating NPS and legato index
-    time_window: u64,
-    /// total duration of the music
-    duration: u64,
-    /// video playback speed
-    playback_speed: f64,
-
-    // Export
-    export_config: Output,
-    export_progress_rx: Option<Receiver<ExportProgress>>,
-    export_progress: (u64, u64),
-}
-
-impl Default for MidiVisualizerAppInner2 {
-    fn default() -> Self {
-        Self {
-            midi_file: None,
-            soundfont_file: None,
-            synth_settings: SynthesizerSettings::new(44100),
-            synth: None,
-
-            music: Default::default(),
-            soundfont: None,
-
-            visualizer_config: Default::default(),
-            clear_color: egui::Color32::from_rgb(0x28, 0x2c, 0x34), // #282c34
-            time: 0,
-            looping: false,
-            play_start_t: None,
-
-            time_window: 1_000_000_000, // 1 second
-            duration: 0,
-            playback_speed: 1.0,
-
-            export_config: Default::default(),
-            export_progress_rx: None,
-            export_progress: (0, 0),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
-pub struct MidiVisualizerAppInner {
-    inner: MidiVisualizerAppInner2,
-
+pub(crate) struct MidiVisualizerAppCache {
     /// cache for NPS max function
-    nps_max_cache: RefCell<Option<LadderFn<u64, f64>>>,
-    note_count_cache: RefCell<Option<LadderFn<u64, usize>>>,
+    nps_max: RefCell<Option<LadderFn<u64, f64>>>,
+    note_count: RefCell<Option<LadderFn<u64, usize>>>,
     added_tab: RefCell<Option<(MidiVisualizerTab, egui_dock::NodePath)>>,
     // synth: RefCell<Option<Synthesizer>>,
     visible_tabs: RefCell<HashMap<MidiVisualizerTab, egui_dock::NodePath>>,
+    synth: RefCell<Option<Arc<Mutex<Synthesizer>>>>,
 }
 
-impl Deref for MidiVisualizerAppInner {
-    type Target = MidiVisualizerAppInner2;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
+#[derive(Clone, Debug)]
+pub(crate) struct MidiVisualizerAppInner2 {
+    pub(crate) midi_file: Option<PathBuf>,
+    pub(crate) soundfont_file: Option<PathBuf>,
+    pub(crate) synth_settings: SynthesizerSettings,
+
+    /// the displaying MIDI music
+    pub(crate) music: Arc<MidiMusic>,
+    /// soundfont for playing MIDI notes
+    pub(crate) soundfont: Option<Arc<SoundFont>>,
+
+    /// configuration of the MIDI visualizer
+    pub(crate) visualizer_config: MidiVisualizerConfig,
+    /// scene clear color
+    pub(crate) clear_color: egui::Color32,
+    /// current playing time in nanoseconds
+    pub(crate) time: u64,
+    pub(crate) looping: bool,
+    /// absolute time corresponding to the start of music
+    ///
+    /// When "play" button is clicked, this value is set to the instant of now minus the song's current playing time.
+    pub(crate) play_start_t: Option<Instant>,
+
+    /// time window for calculating NPS and legato index
+    pub(crate) time_window: u64,
+    /// total duration of the music
+    pub(crate) duration: u64,
+    /// video playback speed
+    pub(crate) playback_speed: f64,
+
+    // Export
+    pub(crate) export_config: Output,
+    pub(crate) export_progress_rx: Option<Receiver<ExportProgress>>,
+    pub(crate) export_progress: (u64, u64),
 }
 
-impl DerefMut for MidiVisualizerAppInner {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MidiVisualizerAppInner {
+    pub(crate) inner: MidiVisualizerAppInner2,
+    pub(crate) cache: MidiVisualizerAppCache,
 }
 
 pub struct MidiVisualizerApp {
@@ -130,151 +98,7 @@ pub struct MidiVisualizerApp {
     dock_state: egui_dock::DockState<MidiVisualizerTab>,
 }
 
-impl Default for MidiVisualizerApp {
-    fn default() -> Self {
-        let value = Self {
-            inner: Default::default(),
-            dock_state: Self::default_dock_state(),
-        };
-        value.update_visible_tabs();
-
-        value
-    }
-}
-
-impl Deref for MidiVisualizerApp {
-    type Target = MidiVisualizerAppInner;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for MidiVisualizerApp {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-#[non_exhaustive]
-pub enum AppStatus {
-    #[default]
-    NoFileOpened,
-    FileOpened(PathBuf),
-    ReadingFailed(PathBuf),
-}
-
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, Ordinalize)]
-#[non_exhaustive]
-pub enum MidiVisualizerTab {
-    VideoPlayback,
-    StyleSettings,
-    OutputSettings,
-    AudioSettings,
-}
-
-const TAB_TITLES: [&str; MidiVisualizerTab::VARIANT_COUNT] = [
-    "Video Playback",
-    "Style Settings",
-    "Output Settings",
-    "Audio Settings",
-];
-const TAB_ICONS: [&str; MidiVisualizerTab::VARIANT_COUNT] = [
-    egui_phosphor::regular::VIDEO,
-    egui_phosphor::regular::PAINT_BRUSH,
-    egui_phosphor::regular::FILE_VIDEO,
-    egui_phosphor::regular::MICROPHONE,
-];
-
-impl MidiVisualizerTab {
-    #[inline(always)]
-    pub fn title(&self) -> &'static str {
-        TAB_TITLES[*self as usize]
-    }
-    #[inline(always)]
-    pub fn icon(&self) -> &'static str {
-        TAB_ICONS[*self as usize]
-    }
-}
-
 impl MidiVisualizerAppInner2 {
-    pub fn play(&mut self) {
-        if self.time >= self.music.duration() {
-            self.time = 0;
-            self.play_start_t = Some(Instant::now());
-        } else {
-            self.play_start_t = Some(
-                Instant::now()
-                    - Duration::from_nanos((self.time as f64 / self.playback_speed) as u64),
-            );
-        }
-    }
-
-    pub fn pause(&mut self) {
-        self.play_start_t = None;
-    }
-
-    pub fn is_playing(&self) -> bool {
-        self.play_start_t.is_some()
-    }
-
-    pub fn is_exporting(&self) -> bool {
-        self.export_progress_rx.is_some()
-    }
-
-    pub fn toggle_play_pause(&mut self) {
-        if self.is_playing() {
-            self.pause();
-        } else {
-            self.play();
-        }
-    }
-
-    pub fn step_frame(&mut self, n: isize) {
-        if n == 0 {
-            return;
-        }
-
-        let playing = self.is_playing();
-        if playing {
-            self.pause();
-        }
-
-        // [TODO] when the division is not exact, there can be cumulative error
-        // maybe define a new `StepGrid` struct with `large_step` and `small_step` fields
-        let dt = 100_000_000 / self.export_config.fps as u64 * n.unsigned_abs() as u64;
-        if n >= 0 {
-            self.time = (self.time + dt).min(self.duration);
-        } else if self.time > dt {
-            self.time -= dt;
-        } else {
-            self.time = 0;
-        }
-
-        if playing {
-            self.play();
-        }
-    }
-
-    pub fn jump_to_start(&mut self) {
-        self.time = 0;
-        if let Some(start_t) = &mut self.play_start_t {
-            *start_t = Instant::now();
-        }
-    }
-
-    pub fn jump_to_end(&mut self) {
-        self.play_start_t = None;
-        self.time = self.duration;
-    }
-
-    pub fn set_music(&mut self, music: MidiMusic) {
-        self.pause();
-        self.music = Arc::new(music);
-        self.time = 0;
-        self.duration = self.music.duration();
-    }
-
     fn start_export(&mut self, ctx: egui::Context) {
         let (progress_tx, progress_rx) = async_channel::unbounded();
         self.export_progress_rx = Some(progress_rx);
@@ -324,64 +148,6 @@ impl MidiVisualizerAppInner2 {
                 ctx.request_repaint();
             }
         });
-    }
-
-    fn resolution(&self) -> Resolution {
-        Resolution {
-            width: self.export_config.width,
-            height: self.export_config.height,
-        }
-    }
-
-    fn show_open_dialog(&mut self) {
-        let opened_file = rfd::FileDialog::new()
-            .add_filter("MIDI files", &["mid", "midi"])
-            .add_filter("All files", &["*"])
-            .pick_file();
-        if let Some(path) = &opened_file {
-            self.load_midi_file(path);
-        }
-    }
-
-    fn load_midi_file(&mut self, path: &PathBuf) {
-        match std::fs::read(path) {
-            Ok(src) => match MidiMusic::try_from(src.as_slice()) {
-                Ok(music) => {
-                    self.set_music(music);
-                    self.midi_file = Some(path.clone());
-                }
-                Err(err) => {
-                    self.show_error_dialog(err);
-                }
-            },
-            Err(err) => {
-                self.show_error_dialog(err);
-            }
-        }
-    }
-
-    fn load_midi_bytes(&mut self, src: &[u8]) {
-        match MidiMusic::try_from(src) {
-            Ok(music) => {
-                self.set_music(music);
-            }
-            Err(err) => {
-                self.show_error_dialog(err);
-            }
-        }
-    }
-
-    fn load_soundfont_file(&mut self, path: &PathBuf) {
-        match std::fs::File::open(path) {
-            Ok(ref mut file) => match SoundFont::new(file) {
-                Ok(soundfont) => {
-                    self.soundfont = Some(Arc::new(soundfont));
-                    self.soundfont_file = Some(path.clone());
-                }
-                Err(err) => self.show_error_dialog(err),
-            },
-            Err(err) => self.show_error_dialog(err),
-        }
     }
 
     fn show_export_dialog(&mut self, ctx: egui::Context) {
@@ -448,106 +214,6 @@ impl MidiVisualizerAppInner2 {
             self.start_export(ctx);
         }
     }
-
-    fn show_load_style_dialog(&mut self) {
-        let fd = rfd::FileDialog::new()
-            .add_filter("Style config file", &["toml"])
-            .add_filter("All files", &["*"]);
-        if let Some(path) = fd.pick_file() {
-            match std::fs::read_to_string(&path) {
-                Ok(src) => match toml::de::from_str(&src) {
-                    Ok(config) => self.visualizer_config = config,
-                    Err(err) => self.show_error_dialog(err),
-                },
-                Err(err) => self.show_error_dialog(err),
-            }
-        }
-    }
-
-    fn show_save_style_dialog(&self) {
-        let fd = rfd::FileDialog::new()
-            .add_filter("Style config file", &["toml"])
-            .add_filter("All files", &["*"]);
-        if let Some(path) = fd.save_file() {
-            match toml::ser::to_string_pretty(&self.visualizer_config) {
-                Ok(src) => match std::fs::write(&path, src) {
-                    Ok(_) => (),
-                    Err(err) => self.show_error_dialog(err),
-                },
-                Err(err) => self.show_error_dialog(err),
-            }
-        }
-    }
-
-    fn show_revert_style_dialog(&mut self) {
-        let reply = rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Warning)
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .set_title("Revert to default")
-            .set_description("All current styles will be lost. Do you want to proceed?")
-            .show();
-        if reply == rfd::MessageDialogResult::Yes {
-            self.export_config = Output::default();
-            self.visualizer_config = MidiVisualizerConfig::default();
-        }
-    }
-
-    fn show_load_soundfont_dialog(&mut self) {
-        let fd = rfd::FileDialog::new()
-            .add_filter("Soundfont file", &["sf2", "sf3"])
-            .add_filter("All", &["*"]);
-        if let Some(path) = fd.pick_file() {
-            self.load_soundfont_file(&path);
-        }
-    }
-
-    fn show_error_dialog(&self, err: impl ToString) {
-        rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Error)
-            .set_title("Error")
-            .set_description(err.to_string())
-            .set_buttons(rfd::MessageButtons::Ok)
-            .show();
-    }
-}
-
-impl MidiVisualizerAppInner {
-    pub fn set_music(&mut self, music: MidiMusic) {
-        self.inner.set_music(music);
-        self.clear_cache();
-    }
-
-    fn clear_cache(&self) {
-        self.nps_max_cache.take();
-        self.note_count_cache.take();
-    }
-
-    fn nps_max_fn(&self) -> Ref<'_, LadderFn<u64, f64>> {
-        if self.nps_max_cache.borrow().is_none() {
-            let nps_max_fn = self.music.nps_max_fn(self.time_window);
-            self.nps_max_cache.replace(Some(nps_max_fn));
-        }
-        Ref::map(self.nps_max_cache.borrow(), |x| {
-            x.as_ref().expect("`nps_max_fn` can't be `None`")
-        })
-    }
-
-    fn note_count_fn(&self) -> Ref<'_, LadderFn<u64, usize>> {
-        if self.note_count_cache.borrow().is_none() {
-            let note_count_fn = self.music.note_count_fn();
-            self.note_count_cache.replace(Some(note_count_fn));
-        }
-        Ref::map(self.note_count_cache.borrow(), |x| {
-            x.as_ref().expect("`notecount_fn` can't be `None`")
-        })
-    }
-
-    fn note_count_total(&self) -> usize {
-        self.note_count_fn()
-            .last_key_value()
-            .map(|(_, &v)| v)
-            .unwrap_or(0)
-    }
 }
 
 impl egui_dock::TabViewer for MidiVisualizerAppInner {
@@ -587,14 +253,14 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
     fn on_add(&mut self, _path: egui_dock::NodePath) {}
 
     fn add_popup(&mut self, ui: &mut egui::Ui, node_path: egui_dock::NodePath) {
-        let mut visible_tabs = self.visible_tabs.borrow_mut();
+        let mut visible_tabs = self.cache.visible_tabs.borrow_mut();
         for tab in MidiVisualizerTab::VARIANTS.iter().copied() {
             let path = visible_tabs.get(&tab).copied();
             if path.is_none() {
                 let resp = ui.selectable_label(false, format!("{} {}", tab.icon(), tab.title()));
                 if resp.clicked() {
                     visible_tabs.insert(tab, node_path);
-                    self.added_tab.replace(Some((tab, node_path)));
+                    self.cache.added_tab.replace(Some((tab, node_path)));
                 }
             }
         }
@@ -639,10 +305,11 @@ impl eframe::App for MidiVisualizerApp {
                 }
 
                 if done {
-                    self.export_progress_rx = None;
-                    self.export_progress = (0, 0);
+                    self.inner.export_progress_rx = None;
+                    self.inner.export_progress = (0, 0);
                     if let Some(err) = error_msg {
-                        error!("Export failed: {err}");
+                        self.show_error_dialog(err.as_str());
+                        error!("Export failed: {}", err);
                     } else {
                         info!("Export completed");
                     }
@@ -664,15 +331,15 @@ impl eframe::App for MidiVisualizerApp {
                             ui.label("Exporting to:");
                             ui.code(format!(
                                 "{}/{}_{}x{}_{}.{}",
-                                self.export_config.dir,
-                                self.export_config.name.as_deref().unwrap_or(""),
-                                self.export_config.width,
-                                self.export_config.height,
-                                self.export_config.fps,
-                                self.export_config.format,
+                                self.export_config().dir,
+                                self.export_config().name.as_deref().unwrap_or(""),
+                                self.export_config().width,
+                                self.export_config().height,
+                                self.export_config().fps,
+                                self.export_config().format,
                             ));
                         });
-                        let (current, total) = self.export_progress;
+                        let (current, total) = self.inner.export_progress;
                         if total > 0 {
                             let progress = current as f32 / total as f32;
                             egui::ProgressBar::new(progress)
@@ -698,7 +365,7 @@ impl eframe::App for MidiVisualizerApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(0))
             .show_inside(ui, |ui| {
-                let num_visible_tabs = self.visible_tabs.borrow().len();
+                let num_visible_tabs = self.inner.cache.visible_tabs.borrow().len();
                 let show_add_popup = num_visible_tabs < MidiVisualizerTab::VARIANT_COUNT;
 
                 egui_dock::DockArea::new(&mut self.dock_state)
@@ -707,13 +374,12 @@ impl eframe::App for MidiVisualizerApp {
                     .show_add_popup(show_add_popup)
                     .show_inside(ui, &mut self.inner);
 
-                if let Some((tab, path)) = self.added_tab.take() {
+                if let Some((tab, path)) = self.inner.cache.added_tab.take() {
                     self.dock_state.set_focused_node_and_surface(path);
                     self.dock_state.push_to_focused_leaf(tab);
                 }
 
                 self.update_visible_tabs();
-                // [TODO] only update visible tabs when needed
             });
     }
 }
@@ -894,9 +560,9 @@ impl MidiVisualizerAppInner {
             preview_widget.time = self.time;
 
             let cache = &mut preview_widget.cache;
-            cache.note_count = Some(self.note_count_fn()(&self.time));
+            cache.note_count = Some(self.note_count());
             cache.note_count_total = Some(self.note_count_total());
-            cache.nps_max = Some(self.nps_max_fn()(&self.time));
+            cache.nps_max = Some(self.nps_max());
 
             preview_widget.ui(ui);
         });
@@ -949,7 +615,7 @@ impl MidiVisualizerAppInner {
                             .update_while_editing(false)
                             .ui(ui);
                         if resp.drag_stopped() {
-                            self.nps_max_cache.borrow_mut().take();
+                            self.cache.nps_max.borrow_mut().take();
                         }
                         ui.label("s");
                     });
@@ -1432,18 +1098,8 @@ impl MidiVisualizerAppInner {
 }
 
 impl MidiVisualizerApp {
-    fn default_dock_state() -> egui_dock::DockState<MidiVisualizerTab> {
-        use MidiVisualizerTab::*;
-        let mut dock_state = egui_dock::DockState::new(vec![VideoPlayback]);
-        let surface = dock_state.main_surface_mut();
-        let [_, right_node] =
-            surface.split_right(egui_dock::NodeIndex::root(), 0.625, vec![StyleSettings]);
-        surface.split_below(right_node, 0.75, vec![OutputSettings]);
-        dock_state
-    }
-
     fn update_visible_tabs(&self) {
-        let mut visible_tabs = self.visible_tabs.borrow_mut();
+        let mut visible_tabs = self.inner.cache.visible_tabs.borrow_mut();
         visible_tabs.clear();
         visible_tabs.extend(
             self.dock_state
@@ -1468,7 +1124,7 @@ impl MidiVisualizerApp {
                 )
                 .clicked()
             {
-                self.show_export_dialog(ctx.clone());
+                self.inner.show_export_dialog(ctx.clone());
             }
         });
 
@@ -1485,7 +1141,7 @@ impl MidiVisualizerApp {
                     ui.selectable_label(path.is_some(), format!("{} {}", tab.icon(), tab.title()));
                 if resp.clicked() {
                     if let Some(path) = path {
-                        if self.is_closeable(&tab) {
+                        if self.inner.is_closeable(&tab) {
                             self.dock_state.remove_tab(path);
                         }
                     } else {
@@ -1639,4 +1295,4 @@ pub fn run_app(app: MidiVisualizerApp, #[cfg(target_arch = "wasm32")] container_
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////                                                                                                                                                                                                                                                                                                     
