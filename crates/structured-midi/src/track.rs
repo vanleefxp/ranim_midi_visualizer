@@ -72,7 +72,7 @@ where
 
     // notes per second in the given time window right before `time`
     pub fn nps(&self, time: u64, window: u64) -> f64 {
-        let time_start = time.checked_sub(window).unwrap_or_default();
+        let time_start = time.saturating_sub(window);
         let range = time_start..time;
         self.notes
             .iter_overlaps(&range)
@@ -82,7 +82,7 @@ where
     }
 
     pub fn legato_index(&self, time: u64, window: u64) -> f64 {
-        let time_start = time.checked_sub(window).unwrap_or_default();
+        let time_start = time.saturating_sub(window);
         let range = time_start..time;
         let duration_sum: u64 = {
             use Bound::*;

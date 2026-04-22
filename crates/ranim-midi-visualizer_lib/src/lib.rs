@@ -360,7 +360,6 @@ pub fn midi_visualizer_scene(
         // font and font size are config variables
         // so clone them to move them into the closure
         let font = font.clone();
-        let font_size = font_size;
         let create_legato_text = move |legato_index: f64| {
             TextItem::new(format!("LEGATO {:.3}", legato_index), font_size)
                 .with_font(font.clone())
@@ -377,7 +376,6 @@ pub fn midi_visualizer_scene(
             for ((_, &v1), (&t2, &v2)) in legato_score_fn.iter().tuple_windows() {
                 // clone values so that they can be moved into the closure
                 let create_legato_text = create_legato_text.clone();
-                let v2 = v2;
 
                 let i_text = create_legato_text(v1);
                 let anim = Func::new(i_text, move |_, t| create_legato_text(v1.lerp(&v2, t)));

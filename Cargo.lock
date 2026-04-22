@@ -4723,6 +4723,7 @@ dependencies = [
  "ranim-midi-visualizer_math",
  "ranim_music",
  "rfd",
+ "rustysynth",
  "serde",
  "structured-midi",
  "toml 1.1.2+spec-1.1.0",
@@ -5207,6 +5208,11 @@ dependencies = [
  "unicode-properties",
  "unicode-script",
 ]
+
+[[package]]
+name = "rustysynth"
+version = "1.3.6"
+source = "git+https://github.com/vanleefxp/rustysynth_fork.git#583893b0cfdbb2dcde3d265045c503c1c6ba7bcd"
 
 [[package]]
 name = "ryu"

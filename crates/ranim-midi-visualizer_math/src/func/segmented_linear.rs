@@ -127,10 +127,10 @@ where
 {
     fn add_assign(&mut self, rhs: &Self) {
         match rhs.len() {
-            0 => return,
+            0 => (),
             1 => {
                 let (x0, y0) = rhs.points.iter().next().unwrap();
-                if self.len() == 0 {
+                if self.is_empty() {
                     self.points.insert(x0.clone(), y0.clone());
                 } else {
                     self.points.iter_mut().for_each(|(_, y)| *y += y0);

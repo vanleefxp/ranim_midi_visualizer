@@ -119,12 +119,9 @@ impl TryFrom<&[u8]> for MidiMusic {
                     }
                     Meta(meta_msg) => {
                         use midly::MetaMessage::*;
-                        match meta_msg {
-                            Tempo(value) => {
-                                // tempo change
-                                nanosec_per_beat = value.as_int() as u64 * 1000;
-                            }
-                            _ => {}
+                        if let Tempo(value) = meta_msg {
+                            // tempo change
+                            nanosec_per_beat = value.as_int() as u64 * 1000;
                         }
                     }
                     _ => {}
@@ -256,15 +253,13 @@ impl MidiMusic {
 
     pub fn next_snap_pos(&self, time: u64) -> Option<u64> {
         self.iter()
-            .map(|track| track.next_snap_pos(time))
-            .flatten()
+            .filter_map(|track| track.next_snap_pos(time))
             .min()
     }
 
     pub fn prev_snap_pos(&self, time: u64) -> Option<u64> {
         self.iter()
-            .map(|track| track.prev_snap_pos(time))
-            .flatten()
+            .filter_map(|track| track.prev_snap_pos(time))
             .max()
     }
 

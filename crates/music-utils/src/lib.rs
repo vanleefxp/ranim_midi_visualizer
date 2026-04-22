@@ -5,6 +5,7 @@ use std::ops::Range;
 use num_integer::Integer as _;
 
 /// Mask for black keys in an octave.
+#[allow(clippy::unusual_byte_groupings)]
 const BLACK_KEY_MASK: u16 = 0b0101010_01010;
 
 /// Index of key among keys of the same color (white or black) in an octave.

@@ -113,7 +113,7 @@ impl PianoKeyboardSize {
     pub fn white_key_overlap_widths(&self) -> [[f64; 2]; 7] {
         let mut white_key_cutoff = [[0.; 2]; 7];
         for (black_idx, white_idx) in BLACK_IDX_TO_PREV_WHITE_IDX.iter().copied().enumerate() {
-            let offset = self.black_offset[black_idx as usize];
+            let offset = self.black_offset[black_idx];
             white_key_cutoff[white_idx as usize][1] = (1. - offset) / 2. * self.black_size.x;
             white_key_cutoff[white_idx as usize + 1][0] = (1. + offset) / 2. * self.black_size.x;
         }

@@ -91,7 +91,10 @@ fn main() -> Result<()> {
     match cmd.get_matches().subcommand() {
         Some(("render", matches)) => render(matches),
         Some(("preview", matches)) => preview(matches),
-        _ => Ok(ui()),
+        _ => {
+            ui();
+            Ok(())
+        }
     }
 }
 

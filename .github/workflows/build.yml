@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    if: github.repository == 'vanleefxp/ranim_midi_visualizer'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-01-01
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "check"
+
+      - name: Run cargo check
+        run: cargo check
+
+
+  lints:
+    name: Lints
+    runs-on: ubuntu-latest
+    if: github.repository == 'vanleefxp/ranim_midi_visualizer'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build"
+
+      - name: Run cargo fmt
+        run: cargo fmt --all --check
+
+      - name: Run cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+    #   - name: Run cargo doc
+    #     run: cargo doc --no-deps --workspace --document-private-items
+    #     env:
+    #       RUSTDOCFLAGS: -D warnings

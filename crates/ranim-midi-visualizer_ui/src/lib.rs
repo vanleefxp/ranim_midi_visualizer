@@ -15,12 +15,13 @@ use ranim::{
 };
 use ranim_midi_visualizer_lib::{ColorBy, midi_visualizer_scene};
 use ranim_midi_visualizer_math::func::LadderFn;
+use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use std::{
     cell::{Ref, RefCell},
     collections::HashMap,
     ops::{Deref, DerefMut},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use structured_midi::MidiMusic;
@@ -34,10 +35,18 @@ enum ExportProgress {
     Error(String),
 }
 
+#[derive(Clone, Debug)]
 pub struct MidiVisualizerAppInner2 {
-    status: AppStatus,
+    midi_file: Option<PathBuf>,
+    soundfont_file: Option<PathBuf>,
+    synth_settings: SynthesizerSettings,
+    synth: Option<Arc<Mutex<Synthesizer>>>,
+
     /// the displaying MIDI music
     pub music: Arc<MidiMusic>,
+    /// soundfont for playing MIDI notes
+    pub soundfont: Option<Arc<SoundFont>>,
+
     /// configuration of the MIDI visualizer
     pub visualizer_config: MidiVisualizerConfig,
     /// scene clear color
@@ -50,8 +59,6 @@ pub struct MidiVisualizerAppInner2 {
     /// When "play" button is clicked, this value is set to the instant of now minus the song's current playing time.
     pub play_start_t: Option<Instant>,
 
-    /// whether the custom resolution dialog is open
-    resolution_dialog_open: bool,
     /// time window for calculating NPS and legato index
     time_window: u64,
     /// total duration of the music
@@ -68,15 +75,20 @@ pub struct MidiVisualizerAppInner2 {
 impl Default for MidiVisualizerAppInner2 {
     fn default() -> Self {
         Self {
-            status: Default::default(),
+            midi_file: None,
+            soundfont_file: None,
+            synth_settings: SynthesizerSettings::new(44100),
+            synth: None,
+
             music: Default::default(),
+            soundfont: None,
+
             visualizer_config: Default::default(),
             clear_color: egui::Color32::from_rgb(0x28, 0x2c, 0x34), // #282c34
             time: 0,
             looping: false,
             play_start_t: None,
 
-            resolution_dialog_open: false,
             time_window: 1_000_000_000, // 1 second
             duration: 0,
             playback_speed: 1.0,
@@ -88,6 +100,7 @@ impl Default for MidiVisualizerAppInner2 {
     }
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct MidiVisualizerAppInner {
     inner: MidiVisualizerAppInner2,
 
@@ -95,6 +108,7 @@ pub struct MidiVisualizerAppInner {
     nps_max_cache: RefCell<Option<LadderFn<u64, f64>>>,
     note_count_cache: RefCell<Option<LadderFn<u64, usize>>>,
     added_tab: RefCell<Option<(MidiVisualizerTab, egui_dock::NodePath)>>,
+    // synth: RefCell<Option<Synthesizer>>,
     visible_tabs: RefCell<HashMap<MidiVisualizerTab, egui_dock::NodePath>>,
 }
 
@@ -108,18 +122,6 @@ impl Deref for MidiVisualizerAppInner {
 impl DerefMut for MidiVisualizerAppInner {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
-    }
-}
-
-impl Default for MidiVisualizerAppInner {
-    fn default() -> Self {
-        Self {
-            inner: Default::default(),
-            nps_max_cache: Default::default(),
-            note_count_cache: Default::default(),
-            added_tab: Default::default(),
-            visible_tabs: Default::default(),
-        }
     }
 }
 
@@ -168,14 +170,20 @@ pub enum MidiVisualizerTab {
     VideoPlayback,
     StyleSettings,
     OutputSettings,
+    AudioSettings,
 }
 
-const TAB_TITLES: [&str; MidiVisualizerTab::VARIANT_COUNT] =
-    ["Video Playback", "Style Settings", "Output Settings"];
+const TAB_TITLES: [&str; MidiVisualizerTab::VARIANT_COUNT] = [
+    "Video Playback",
+    "Style Settings",
+    "Output Settings",
+    "Audio Settings",
+];
 const TAB_ICONS: [&str; MidiVisualizerTab::VARIANT_COUNT] = [
     egui_phosphor::regular::VIDEO,
     egui_phosphor::regular::PAINT_BRUSH,
     egui_phosphor::regular::FILE_VIDEO,
+    egui_phosphor::regular::MICROPHONE,
 ];
 
 impl MidiVisualizerTab {
@@ -234,7 +242,7 @@ impl MidiVisualizerAppInner2 {
 
         // [TODO] when the division is not exact, there can be cumulative error
         // maybe define a new `StepGrid` struct with `large_step` and `small_step` fields
-        let dt = 100_000_000 / self.export_config.fps as u64 * n.abs() as u64;
+        let dt = 100_000_000 / self.export_config.fps as u64 * n.unsigned_abs() as u64;
         if n >= 0 {
             self.time = (self.time + dt).min(self.duration);
         } else if self.time > dt {
@@ -331,23 +339,48 @@ impl MidiVisualizerAppInner2 {
             .add_filter("All files", &["*"])
             .pick_file();
         if let Some(path) = &opened_file {
-            // load music
-            match std::fs::read(path) {
-                Ok(src) => match MidiMusic::try_from(src.as_slice()) {
-                    Ok(music) => {
-                        self.set_music(music);
-                        self.status = AppStatus::FileOpened(path.clone());
-                    }
-                    Err(err) => {
-                        self.status = AppStatus::ReadingFailed(path.clone());
-                        self.show_error_dialog(err);
-                    }
-                },
+            self.load_midi_file(path);
+        }
+    }
+
+    fn load_midi_file(&mut self, path: &PathBuf) {
+        match std::fs::read(path) {
+            Ok(src) => match MidiMusic::try_from(src.as_slice()) {
+                Ok(music) => {
+                    self.set_music(music);
+                    self.midi_file = Some(path.clone());
+                }
                 Err(err) => {
-                    self.status = AppStatus::ReadingFailed(path.clone());
                     self.show_error_dialog(err);
                 }
+            },
+            Err(err) => {
+                self.show_error_dialog(err);
             }
+        }
+    }
+
+    fn load_midi_bytes(&mut self, src: &[u8]) {
+        match MidiMusic::try_from(src) {
+            Ok(music) => {
+                self.set_music(music);
+            }
+            Err(err) => {
+                self.show_error_dialog(err);
+            }
+        }
+    }
+
+    fn load_soundfont_file(&mut self, path: &PathBuf) {
+        match std::fs::File::open(path) {
+            Ok(ref mut file) => match SoundFont::new(file) {
+                Ok(soundfont) => {
+                    self.soundfont = Some(Arc::new(soundfont));
+                    self.soundfont_file = Some(path.clone());
+                }
+                Err(err) => self.show_error_dialog(err),
+            },
+            Err(err) => self.show_error_dialog(err),
         }
     }
 
@@ -359,20 +392,14 @@ impl MidiVisualizerAppInner2 {
             .add_filter("GIF", &["gif"])
             .set_title("Save video");
 
-        {
-            use AppStatus::*;
-            match &self.status {
-                FileOpened(path) => {
-                    if let Some(parent) = path.parent() {
-                        fd = fd.set_directory(parent);
-                    }
-                    if let Some(filename) = path.file_stem()
-                        && let Some(filename) = filename.to_str()
-                    {
-                        fd = fd.set_file_name(filename);
-                    }
-                }
-                _ => (),
+        if let Some(path) = &self.midi_file {
+            if let Some(parent) = path.parent() {
+                fd = fd.set_directory(parent);
+            }
+            if let Some(filename) = path.file_stem()
+                && let Some(filename) = filename.to_str()
+            {
+                fd = fd.set_file_name(filename);
             }
         }
 
@@ -381,9 +408,9 @@ impl MidiVisualizerAppInner2 {
             && let Some(ext) = path.extension()
             && let Some(ext) = ext.to_str()
         {
-            self.export_config.format = {
+            use OutputFormat::*;
+            let format = {
                 let ext = ext.to_lowercase();
-                use OutputFormat::*;
                 match ext.as_str() {
                     "mp4" => Mp4,
                     "webm" => Webm,
@@ -392,6 +419,23 @@ impl MidiVisualizerAppInner2 {
                     _ => unreachable!(),
                 }
             };
+            self.export_config.format = format;
+
+            // Warn if the current video format does not support opacity but the clear color is not opaque
+            if !self.clear_color.is_opaque() && matches!(format, Mp4 | Gif) {
+                let result = rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("Opacity Warning")
+                .set_description(format!("The {} format does not support opacity. The background color will be blended with black. Do you really want to proceed?", format))
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show();
+                if result == rfd::MessageDialogResult::No {
+                    // re-ask for export path
+                    self.show_export_dialog(ctx);
+                    return;
+                }
+            }
+
             if let Some(filename) = path.file_stem()
                 && let Some(filename) = filename.to_str()
             {
@@ -442,12 +486,18 @@ impl MidiVisualizerAppInner2 {
             .set_title("Revert to default")
             .set_description("All current styles will be lost. Do you want to proceed?")
             .show();
-        match reply {
-            rfd::MessageDialogResult::Yes => {
-                self.export_config = Output::default();
-                self.visualizer_config = MidiVisualizerConfig::default();
-            }
-            _ => (),
+        if reply == rfd::MessageDialogResult::Yes {
+            self.export_config = Output::default();
+            self.visualizer_config = MidiVisualizerConfig::default();
+        }
+    }
+
+    fn show_load_soundfont_dialog(&mut self) {
+        let fd = rfd::FileDialog::new()
+            .add_filter("Soundfont file", &["sf2", "sf3"])
+            .add_filter("All", &["*"]);
+        if let Some(path) = fd.pick_file() {
+            self.load_soundfont_file(&path);
         }
     }
 
@@ -513,6 +563,7 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
             VideoPlayback => self.video_playback_ui(ui),
             StyleSettings => self.style_settings_ui(ui),
             OutputSettings => self.output_settings_ui(ui),
+            AudioSettings => self.audio_settings_ui(ui),
         }
     }
 
@@ -524,6 +575,7 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
         }
     }
 
+    #[allow(clippy::match_like_matches_macro)]
     fn is_closeable(&self, tab: &Self::Tab) -> bool {
         use MidiVisualizerTab::*;
         match tab {
@@ -537,7 +589,7 @@ impl egui_dock::TabViewer for MidiVisualizerAppInner {
     fn add_popup(&mut self, ui: &mut egui::Ui, node_path: egui_dock::NodePath) {
         let mut visible_tabs = self.visible_tabs.borrow_mut();
         for tab in MidiVisualizerTab::VARIANTS.iter().copied() {
-            let path = visible_tabs.get(&tab).map(|v| *v);
+            let path = visible_tabs.get(&tab).copied();
             if path.is_none() {
                 let resp = ui.selectable_label(false, format!("{} {}", tab.icon(), tab.title()));
                 if resp.clicked() {
@@ -613,11 +665,7 @@ impl eframe::App for MidiVisualizerApp {
                             ui.code(format!(
                                 "{}/{}_{}x{}_{}.{}",
                                 self.export_config.dir,
-                                self.export_config
-                                    .name
-                                    .as_ref()
-                                    .map(|v| v.as_str())
-                                    .unwrap_or(""),
+                                self.export_config.name.as_deref().unwrap_or(""),
                                 self.export_config.width,
                                 self.export_config.height,
                                 self.export_config.fps,
@@ -644,150 +692,7 @@ impl eframe::App for MidiVisualizerApp {
         }
 
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
-            egui::MenuBar::default().ui(ui, |ui| {
-                ui.menu_button(format!("{} File", egui_phosphor::regular::FILE), |ui| {
-                    if ui
-                        .button(format!("{} Open", egui_phosphor::regular::FOLDER_OPEN))
-                        .clicked()
-                    {
-                        self.show_open_dialog();
-                    }
-                    if ui
-                        .add_enabled(
-                            !self.is_exporting(),
-                            egui::Button::new(format!("{} Export", egui_phosphor::regular::EXPORT)),
-                        )
-                        .clicked()
-                    {
-                        self.show_export_dialog(ctx.clone());
-                    }
-                });
-
-                ui.menu_button(format!("{} View", egui_phosphor::regular::EYE), |ui| {
-                    let opened_tabs = self
-                        .dock_state
-                        .iter_all_tabs()
-                        .map(|(path, &tab)| (tab, path))
-                        .collect::<HashMap<_, _>>();
-
-                    for tab in MidiVisualizerTab::VARIANTS.iter().copied() {
-                        let path = opened_tabs.get(&tab).map(|v| *v);
-                        let resp = ui.selectable_label(
-                            path.is_some(),
-                            format!("{} {}", tab.icon(), tab.title()),
-                        );
-                        if resp.clicked() {
-                            if let Some(path) = path {
-                                if self.is_closeable(&tab) {
-                                    self.dock_state.remove_tab(path);
-                                }
-                            } else {
-                                self.dock_state.main_surface_mut().split_right(
-                                    egui_dock::NodeIndex::root(),
-                                    0.625,
-                                    vec![tab],
-                                );
-                            }
-                        }
-                    }
-                    ui.separator();
-                    if ui
-                        .button(format!(
-                            "{} Revert to default",
-                            egui_phosphor::regular::ERASER
-                        ))
-                        .clicked()
-                    {
-                        self.dock_state = Self::default_dock_state();
-                        self.update_visible_tabs();
-                    }
-                });
-
-                ui.menu_button(
-                    format!("{} Style", egui_phosphor::regular::PAINT_BRUSH),
-                    |ui| {
-                        // Save style
-                        if ui
-                            .button(format!(
-                                "{} Save style",
-                                egui_phosphor::regular::FLOPPY_DISK
-                            ))
-                            .clicked()
-                        {
-                            self.show_save_style_dialog();
-                        }
-
-                        // Load style
-                        if ui
-                            .button(format!(
-                                "{} Load style",
-                                egui_phosphor::regular::FOLDER_OPEN
-                            ))
-                            .clicked()
-                        {
-                            self.show_load_style_dialog();
-                        }
-
-                        ui.separator();
-
-                        // Revert style to default
-                        if ui
-                            .button(format!(
-                                "{} Revert to default",
-                                egui_phosphor::regular::ERASER
-                            ))
-                            .clicked()
-                        {
-                            self.show_revert_style_dialog();
-                        }
-                    },
-                );
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // light / dark mode toggle
-                    {
-                        let dark_mode = ui.visuals().dark_mode;
-                        let button_text = if dark_mode {
-                            egui_phosphor::regular::SUN
-                        } else {
-                            egui_phosphor::regular::MOON
-                        };
-                        let tooltip = if dark_mode {
-                            "Switch to light mode"
-                        } else {
-                            "Switch to dark mode"
-                        };
-                        if ui.button(button_text).on_hover_text(tooltip).clicked() {
-                            if dark_mode {
-                                ctx.set_theme(egui::Theme::Light);
-                            } else {
-                                ctx.set_theme(egui::Theme::Dark);
-                            }
-                        }
-                    }
-                });
-            });
-        });
-
-        egui::Panel::bottom("bottom_panel").show_inside(ui, |ui| {
-            // status message
-            match &self.status {
-                AppStatus::NoFileOpened => {
-                    ui.label("Open a MIDI file to start visualization.");
-                }
-                AppStatus::FileOpened(path) => {
-                    ui.horizontal(|ui| {
-                        ui.label("Opened: ");
-                        ui.code(path.display().to_string());
-                    });
-                }
-                AppStatus::ReadingFailed(path) => {
-                    ui.horizontal(|ui| {
-                        ui.label("Failed to read: ");
-                        ui.code(path.display().to_string());
-                    });
-                }
-            }
+            egui::MenuBar::default().ui(ui, |ui| self.menu_ui(ui));
         });
 
         egui::CentralPanel::default()
@@ -827,6 +732,18 @@ impl MidiVisualizerAppInner {
         }
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
             self.step_frame(1);
+        }
+
+        // drag and drop for midi files
+        {
+            let file = ctx.input(|i| i.raw.dropped_files.first().cloned());
+            if let Some(file) = file {
+                if let Some(src) = file.bytes {
+                    self.load_midi_bytes(src.as_ref());
+                } else if let Some(path) = file.path {
+                    self.load_midi_file(&path);
+                }
+            }
         }
 
         egui::Panel::bottom("playback_control").show_inside(ui, |ui| {
@@ -1299,8 +1216,7 @@ impl MidiVisualizerAppInner {
                             for (value, text) in status_bar_config
                                 .padding
                                 .iter_mut()
-                                .map(|v| [&mut v.x, &mut v.y])
-                                .flatten()
+                                .flat_map(|v| [&mut v.x, &mut v.y])
                                 .zip(["Left", "Bottom", "Right", "Top"])
                             {
                                 egui::DragValue::new(value)
@@ -1400,14 +1316,6 @@ impl MidiVisualizerAppInner {
                             // 21:9
                             ui.label(egui::RichText::new("21:9").strong());
                             resolution_select_value(ui, Resolution::UW_QHD, "3440×1440 (UW-QHD)");
-                            ui.separator();
-                            if ui
-                                .selectable_label(false, "Custom")
-                                .on_hover_text("Open resolution dialog")
-                                .clicked()
-                            {
-                                self.resolution_dialog_open = true;
-                            }
                         });
                 });
                 ui.end_row();
@@ -1439,6 +1347,88 @@ impl MidiVisualizerAppInner {
             ui.end_row();
         });
     }
+
+    fn audio_settings_ui(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new("audio_grid").show(ui, |ui| {
+            // Soundfont
+            {
+                ui.label("Soundfont:");
+                ui.horizontal(|ui| {
+                    if ui.button(egui_phosphor::regular::FOLDER_OPEN).clicked() {
+                        self.show_load_soundfont_dialog();
+                    }
+                    match &self.soundfont_file {
+                        Some(path) => {
+                            ui.label(
+                                path.file_name()
+                                    .map(|u| u.display().to_string())
+                                    .unwrap_or_else(|| "".to_string()),
+                            );
+                        }
+                        None => {
+                            ui.label("(None)");
+                        }
+                    }
+                });
+                ui.end_row();
+            }
+
+            // ui.label("Audio device:");
+            // ui.end_row();
+
+            // Sample rate
+            {
+                ui.label("Sample rate:");
+                let value = &mut self.synth_settings.sample_rate;
+                const COMMON_SAMPLE_RATES: [u32; 12] = [
+                    8000, 11025, 16000, 22050, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
+                    384000,
+                ];
+                // [TODO] make this an editable combo box which supports custom input
+                egui::ComboBox::from_id_salt("sample_rate_combo")
+                    .selected_text(format!("{} Hz", value))
+                    .show_ui(ui, |ui| {
+                        for selected_value in COMMON_SAMPLE_RATES {
+                            ui.selectable_value(
+                                value,
+                                selected_value,
+                                format!("{} Hz", selected_value),
+                            );
+                        }
+                    });
+                ui.end_row();
+            }
+
+            // Block size
+            {
+                ui.label("Block size:");
+                let value = &mut self.synth_settings.block_size;
+                egui::DragValue::new(value)
+                    .range(16..=1024)
+                    .update_while_editing(false)
+                    .ui(ui);
+                ui.end_row();
+            }
+
+            // Maximum polyphony
+            {
+                ui.label("Max polyphony:");
+                let value = &mut self.synth_settings.maximum_polyphony;
+                egui::DragValue::new(value)
+                    .range(1..=64)
+                    .update_while_editing(false)
+                    .ui(ui);
+                ui.end_row();
+            }
+
+            // enable reverb and chorus
+            {
+                ui.label("");
+                let value = &mut self.synth_settings.enable_reverb_and_chorus;
+                ui.checkbox(value, "Enable reverb and chorus");
+            }
+        });
+    }
 }
 
 impl MidiVisualizerApp {
@@ -1460,6 +1450,129 @@ impl MidiVisualizerApp {
                 .iter_all_tabs()
                 .map(|(path, &tab)| (tab, path.node_path())),
         );
+    }
+
+    fn menu_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        ui.menu_button(format!("{} File", egui_phosphor::regular::FILE), |ui| {
+            if ui
+                .button(format!("{} Open", egui_phosphor::regular::FOLDER_OPEN))
+                .clicked()
+            {
+                self.show_open_dialog();
+            }
+            if ui
+                .add_enabled(
+                    !self.is_exporting(),
+                    egui::Button::new(format!("{} Export", egui_phosphor::regular::EXPORT)),
+                )
+                .clicked()
+            {
+                self.show_export_dialog(ctx.clone());
+            }
+        });
+
+        ui.menu_button(format!("{} View", egui_phosphor::regular::EYE), |ui| {
+            let opened_tabs = self
+                .dock_state
+                .iter_all_tabs()
+                .map(|(path, &tab)| (tab, path))
+                .collect::<HashMap<_, _>>();
+
+            for tab in MidiVisualizerTab::VARIANTS.iter().copied() {
+                let path = opened_tabs.get(&tab).copied();
+                let resp =
+                    ui.selectable_label(path.is_some(), format!("{} {}", tab.icon(), tab.title()));
+                if resp.clicked() {
+                    if let Some(path) = path {
+                        if self.is_closeable(&tab) {
+                            self.dock_state.remove_tab(path);
+                        }
+                    } else {
+                        self.dock_state.main_surface_mut().split_right(
+                            egui_dock::NodeIndex::root(),
+                            0.625,
+                            vec![tab],
+                        );
+                    }
+                }
+            }
+            ui.separator();
+            if ui
+                .button(format!(
+                    "{} Revert to default",
+                    egui_phosphor::regular::ERASER
+                ))
+                .clicked()
+            {
+                self.dock_state = Self::default_dock_state();
+                self.update_visible_tabs();
+            }
+        });
+
+        ui.menu_button(
+            format!("{} Style", egui_phosphor::regular::PAINT_BRUSH),
+            |ui| {
+                // Save style
+                if ui
+                    .button(format!(
+                        "{} Save style",
+                        egui_phosphor::regular::FLOPPY_DISK
+                    ))
+                    .clicked()
+                {
+                    self.show_save_style_dialog();
+                }
+
+                // Load style
+                if ui
+                    .button(format!(
+                        "{} Load style",
+                        egui_phosphor::regular::FOLDER_OPEN
+                    ))
+                    .clicked()
+                {
+                    self.show_load_style_dialog();
+                }
+
+                ui.separator();
+
+                // Revert style to default
+                if ui
+                    .button(format!(
+                        "{} Revert to default",
+                        egui_phosphor::regular::ERASER
+                    ))
+                    .clicked()
+                {
+                    self.show_revert_style_dialog();
+                }
+            },
+        );
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // light / dark mode toggle
+            {
+                let dark_mode = ui.visuals().dark_mode;
+                let button_text = if dark_mode {
+                    egui_phosphor::regular::SUN
+                } else {
+                    egui_phosphor::regular::MOON
+                };
+                let tooltip = if dark_mode {
+                    "Switch to light mode"
+                } else {
+                    "Switch to dark mode"
+                };
+                if ui.button(button_text).on_hover_text(tooltip).clicked() {
+                    if dark_mode {
+                        ctx.set_theme(egui::Theme::Light);
+                    } else {
+                        ctx.set_theme(egui::Theme::Dark);
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -1526,4 +1639,4 @@ pub fn run_app(app: MidiVisualizerApp, #[cfg(target_arch = "wasm32")] container_
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////

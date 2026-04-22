@@ -371,9 +371,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                                 })
                                 .collect(),
                             Track => notes_on
-                                .map(|note| {
-                                    (note.key, *note_colors.index_cyc(note.loc.track as usize))
-                                })
+                                .map(|note| (note.key, *note_colors.index_cyc(note.loc.track)))
                                 .collect(),
                             KeyColor => notes_on
                                 .map(|note| {
@@ -646,7 +644,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                             use ColorBy::*;
                             match self.visualizer_config.color_by {
                                 Channel => *note_colors.index_cyc(note.loc.channel as usize),
-                                Track => *note_colors.index_cyc(note.loc.track as usize),
+                                Track => *note_colors.index_cyc(note.loc.track),
                                 KeyColor => *note_colors.index_cyc(is_black_key(note.key) as usize),
                             }
                         }

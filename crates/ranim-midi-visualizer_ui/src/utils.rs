@@ -35,7 +35,7 @@ impl From<RanimColor> for egui::Color32 {
 impl From<EguiColor> for AlphaColor<Srgb> {
     fn from(value: EguiColor) -> Self {
         let [r, g, b, a] = value.to_array();
-        AlphaColor::from_rgba8(r, g, b, a).into()
+        AlphaColor::from_rgba8(r, g, b, a)
     }
 }
 
