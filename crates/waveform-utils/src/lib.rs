@@ -1,7 +1,7 @@
 #![feature(more_float_constants)]
 pub mod envelope;
-pub mod synth;
 pub mod freq;
+pub mod synth;
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI, SQRT_2, SQRT_3};
 

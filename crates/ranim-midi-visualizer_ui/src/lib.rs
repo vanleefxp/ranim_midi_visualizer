@@ -23,16 +23,16 @@ use ranim::{
 };
 use ranim_midi_visualizer_lib::{ColorBy, midi_visualizer_scene};
 use ranim_midi_visualizer_math::func::LadderFn;
-use waveform_utils::synth::Synthesizer;
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 use structured_midi::MidiMusic;
 use tracing::{error, info};
+use waveform_utils::synth::Synth;
 
 #[allow(unused)]
 enum ExportProgress {
@@ -65,8 +65,10 @@ pub(crate) struct MidiVisualizerAppCache {
 pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) midi_file: Option<PathBuf>,
     #[derivative(Debug = "ignore")]
-    pub(crate) synth: Option<Arc<Mutex<dyn Synthesizer<i8>>>>,
+    pub(crate) synth: Arc<Mutex<dyn Synth>>,
     pub(crate) audio_device_idx: isize,
+    pub(crate) test_sound_playing: bool,
+    pub(crate) notes_on: HashSet<i8>,
 
     /// the displaying MIDI music
     pub(crate) music: Arc<MidiMusic>,
@@ -291,6 +293,34 @@ impl eframe::App for MidiVisualizerApp {
         //         let mut text = format!("{:?}", self.note_count_cache);
         //         egui::TextEdit::multiline(&mut text).ui(ui);
         //     });
+
+        if self.is_playing() {
+            let time_range = self.inner.time..self.inner.time;
+            let notes_on = &mut self.inner.inner.notes_on;
+            let new_notes_on = self
+                .inner
+                .inner
+                .music
+                .notes_between_iter(&time_range, &..)
+                .map(|(_, note)| note.key)
+                .collect::<HashSet<_>>();
+            let started_notes = new_notes_on
+                .iter()
+                .copied()
+                .filter(|v| !notes_on.contains(v));
+            let stopped_notes = notes_on
+                .iter()
+                .copied()
+                .filter(|v| !new_notes_on.contains(v));
+            let mut synth = self.inner.inner.synth.lock().unwrap();
+            for note in started_notes {
+                synth.attack(note, 0.5);
+            }
+            for note in stopped_notes {
+                synth.release(&note);
+            }
+            *notes_on = new_notes_on;
+        }
 
         // exporting
         {
@@ -1029,7 +1059,6 @@ impl MidiVisualizerAppInner {
             // Audio device
             {
                 ui.label("Audio device:");
-                let value = &mut self.inner.audio_device_idx;
 
                 let device_type_to_icon = |device_type: cpal::DeviceType| {
                     use cpal::DeviceType::*;
@@ -1065,35 +1094,45 @@ impl MidiVisualizerAppInner {
                 };
 
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("audio_device_combo")
-                        .selected_text(
-                            AUDIO_DEVICES
-                                .get(*value as usize)
-                                .map(device_display_string)
-                                .unwrap_or_else(|| "(None)".to_string()),
-                        )
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(value, -1, "(None)");
-                            for (idx, device) in AUDIO_DEVICES.iter().enumerate() {
-                                ui.selectable_value(
-                                    value,
-                                    idx as isize,
-                                    device_display_string(device),
-                                );
+                    // Device combo box
+                    {
+                        let value = &mut self.inner.audio_device_idx;
+                        egui::ComboBox::from_id_salt("audio_device_combo")
+                            .selected_text(
+                                AUDIO_DEVICES
+                                    .get(*value as usize)
+                                    .map(device_display_string)
+                                    .unwrap_or_else(|| "(None)".to_string()),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(value, -1, "(None)");
+                                for (idx, device) in AUDIO_DEVICES.iter().enumerate() {
+                                    ui.selectable_value(
+                                        value,
+                                        idx as isize,
+                                        device_display_string(device),
+                                    );
+                                }
+                            });
+                    }
+
+                    // Test button
+                    {
+                        ui.add_enabled_ui(self.audio_device().is_some(), |ui| {
+                            let resp = ui.toggle_value(
+                                &mut self.inner.test_sound_playing,
+                                egui_phosphor::regular::HEADPHONES,
+                            );
+                            if resp.changed() {
+                                // play a 440 Hz sine wave to test the audio device
+                                let mut synth = self.inner.synth.lock().unwrap();
+                                if self.inner.test_sound_playing {
+                                    synth.attack(9, 1.0);
+                                } else {
+                                    synth.release(&9);
+                                }
                             }
                         });
-
-                    // test button
-                    {
-                        let resp = ui
-                            .add_enabled(
-                                *value >= 0,
-                                egui::Button::new(egui_phosphor::regular::HEADPHONES),
-                            )
-                            .on_hover_text("Test");
-                        if resp.clicked() {
-                            // [TODO] test audio device by playing a 440 Hz sine wave
-                        }
                     }
                 });
                 ui.end_row();

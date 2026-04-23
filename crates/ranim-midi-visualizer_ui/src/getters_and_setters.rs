@@ -2,12 +2,15 @@ use std::{
     cell::Ref,
     path::PathBuf,
     sync::Arc,
+    thread,
     time::{Duration, Instant},
 };
 
+use cpal::traits::{DeviceTrait as _, StreamTrait};
 use ranim::{Output, cmd::preview::Resolution};
 use ranim_midi_visualizer_math::func::LadderFn;
 use structured_midi::MidiMusic;
+use tracing::{error, info};
 
 use crate::{
     AUDIO_DEVICES, MidiVisualizerApp, MidiVisualizerAppInner, MidiVisualizerAppInner2,
@@ -140,6 +143,7 @@ impl MidiVisualizerApp {
 
 impl MidiVisualizerAppInner2 {
     pub(crate) fn play(&mut self) {
+        self.synth.lock().unwrap().play();
         if self.time >= self.music.duration() {
             self.time = 0;
             self.play_start_t = Some(Instant::now());
@@ -153,6 +157,8 @@ impl MidiVisualizerAppInner2 {
 
     pub(crate) fn pause(&mut self) {
         self.play_start_t = None;
+        self.synth.lock().unwrap().pause();
+        self.test_sound_playing = false;
     }
 
     pub(crate) fn toggle_play_pause(&mut self) {
@@ -297,6 +303,47 @@ impl MidiVisualizerAppInner2 {
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
     }
+
+    pub(crate) fn open_audio_stream(&mut self) {
+        if let Some(device) = self.audio_device() {
+            match device.default_output_config() {
+                Ok(config) => {
+                    let synth = self.synth.clone();
+                    let config = cpal::StreamConfig::from(config);
+                    info!("Stream config: {:?}", config);
+                    let config_clone = config.clone();
+                    match device.build_output_stream(
+                        &config,
+                        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                            synth.lock().unwrap().write_to_buffer(&config_clone, data);
+                        },
+                        move |err| error!("Stream error: {}", err),
+                        None,
+                    ) {
+                        Ok(stream) => {
+                            thread::spawn(move || {
+                                if let Err(err) = stream.play() {
+                                    error!("Play stream error: {}", err);
+                                } else {
+                                    info!("Stream started.")
+                                }
+                                loop {
+                                    thread::sleep(Duration::from_secs(1));
+                                }
+                            });
+                        }
+                        Err(err) => error!("Build stream error: {}", err),
+                    }
+                }
+                Err(err) => error!("Stream config error: {}", err),
+            }
+        }
+    }
+
+    pub(crate) fn set_audio_device(&mut self, idx: isize) {
+        self.audio_device_idx = idx;
+        self.open_audio_stream();
+    }
 }
 
 impl MidiVisualizerAppInner {
@@ -348,6 +395,11 @@ impl MidiVisualizerApp {
     #[inline(always)]
     pub fn set_music(&mut self, music: MidiMusic) {
         self.inner.set_music(music);
+    }
+
+    #[inline(always)]
+    pub fn set_audio_device(&mut self, idx: isize) {
+        self.inner.set_audio_device(idx);
     }
 
     /// Show the open file dialog to load a MIDI file.

@@ -1,14 +1,19 @@
+use std::sync::{Arc, Mutex};
+
 use eframe::egui;
+use waveform_utils::synth::SimpleWaveformSynth;
 
 use crate::{MidiVisualizerApp, MidiVisualizerAppInner2, tabs::MidiVisualizerTab};
 
 impl Default for MidiVisualizerAppInner2 {
     fn default() -> Self {
-        Self {
+        let mut value = Self {
             midi_file: None,
             music: Default::default(),
-            synth: None,
+            synth: Arc::new(Mutex::new(SimpleWaveformSynth::default())),
             audio_device_idx: 0,
+            test_sound_playing: false,
+            notes_on: Default::default(),
 
             visualizer_config: Default::default(),
             clear_color: egui::Color32::from_rgb(0x28, 0x2c, 0x34), // #282c34
@@ -23,7 +28,9 @@ impl Default for MidiVisualizerAppInner2 {
             export_config: Default::default(),
             export_progress_rx: None,
             export_progress: (0, 0),
-        }
+        };
+        value.open_audio_stream();
+        value
     }
 }
 
