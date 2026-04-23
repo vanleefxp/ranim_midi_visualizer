@@ -14,15 +14,17 @@ egui_dialogs = { workspace = true }
 
 # Ranim series
 ranim = { workspace = true }
+
 ranim_music = { workspace = true }
 ranim-midi-visualizer_lib = { workspace = true, features = ["serde"] }
 ranim-midi-visualizer_math = { workspace = true }
+structured-midi = { workspace = true }
+music-utils = { workspace = true }
+waveform-utils = { workspace = true }
 
 rfd = { workspace = true }
-structured-midi = { workspace = true }
 derive_more = { workspace = true }
 derivative = { workspace = true }
-music-utils = { workspace = true }
 # i_triangle = { version = "0.41.0", features = ["glam"] }
 ordered-float = { workspace = true }
 async-channel = { workspace = true }

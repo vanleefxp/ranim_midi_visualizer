@@ -1,0 +1,11 @@
+[package]
+name = "waveform-utils"
+description = "Utility functions and types for standard waveforms and synthesizers."
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+derivative = { workspace = true }
+cpal = { workspace = true }

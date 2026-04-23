@@ -67,7 +67,6 @@ pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) midi_file: Option<PathBuf>,
     pub(crate) soundfont_file: Option<PathBuf>,
     pub(crate) synth_settings: SynthesizerSettings,
-    #[derivative(Debug = "ignore")]
     pub(crate) audio_device_idx: isize,
 
     /// the displaying MIDI music
@@ -1033,32 +1032,67 @@ impl MidiVisualizerAppInner {
             {
                 ui.label("Audio device:");
                 let value = &mut self.inner.audio_device_idx;
-                let get_device_name = |device: &cpal::Device| {
-                    device
-                        .description()
-                        .ok()
-                        .map(|v| v.name().to_string())
-                        .unwrap_or_else(|| "Unknown device".to_string())
+
+                let device_type_to_icon = |device_type: cpal::DeviceType| {
+                    use cpal::DeviceType::*;
+                    use egui_phosphor::regular::*;
+                    match device_type {
+                        Speaker => SPEAKER_HIGH,
+                        Microphone => MICROPHONE,
+                        Headphones => HEADPHONES,
+                        Headset => HEADSET,
+                        Earpiece => DEVICE_MOBILE,
+                        Handset => PHONE_CALL,
+                        HearingAid => HEADPHONES,
+                        Dock => FADERS,
+                        Tuner => WAVE_SINE,
+                        Virtual => DESKTOP_TOWER,
+                        _ => QUESTION_MARK,
+                    }
                 };
+
+                let device_display_string = |device: &cpal::Device| {
+                    if let Ok(desc) = device.description() {
+                        format!(
+                            "{} {}",
+                            device_type_to_icon(desc.device_type()),
+                            desc.name()
+                        )
+                    } else {
+                        format!(
+                            "{} (Unknown device)",
+                            device_type_to_icon(cpal::DeviceType::Unknown)
+                        )
+                    }
+                };
+
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_salt("audio_device_combo")
                         .selected_text(
                             AUDIO_DEVICES
                                 .get(*value as usize)
-                                .map(get_device_name)
+                                .map(device_display_string)
                                 .unwrap_or_else(|| "(None)".to_string()),
                         )
                         .show_ui(ui, |ui| {
                             ui.selectable_value(value, -1, "(None)");
                             for (idx, device) in AUDIO_DEVICES.iter().enumerate() {
-                                ui.selectable_value(value, idx as isize, get_device_name(device));
+                                ui.selectable_value(
+                                    value,
+                                    idx as isize,
+                                    device_display_string(device),
+                                );
                             }
                         });
+
+                    // test button
                     {
-                        let resp = ui.add_enabled(
-                            *value >= 0,
-                            egui::Button::new(egui_phosphor::regular::HEADPHONES),
-                        );
+                        let resp = ui
+                            .add_enabled(
+                                *value >= 0,
+                                egui::Button::new(egui_phosphor::regular::HEADPHONES),
+                            )
+                            .on_hover_text("Test");
                         if resp.clicked() {
                             // [TODO] test audio device by playing a 440 Hz sine wave
                         }

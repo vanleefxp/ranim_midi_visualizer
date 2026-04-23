@@ -4873,6 +4873,7 @@ dependencies = [
  "structured-midi",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
+ "waveform-utils",
 ]
 
 [[package]]
@@ -7250,6 +7251,14 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "semver",
+]
+
+[[package]]
+name = "waveform-utils"
+version = "0.1.2"
+dependencies = [
+ "cpal",
+ "derivative",
 ]
 
 [[package]]

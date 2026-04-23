@@ -39,6 +39,7 @@ members = [
     "crates/ranim-midi-visualizer_ui",
     "crates/music-utils",
     "crates/ranim-midi-visualizer_math",
+    "crates/waveform-utils",
 ]
 
 [workspace.dependencies]
@@ -54,6 +55,9 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 ranim_music = { path = "crates/ranim_music" }
 ranim-midi-visualizer_math = { path = "crates/ranim-midi-visualizer_math" }
+structured-midi = { path = "crates/structured-midi" }
+music-utils = { path = "crates/music-utils" }
+waveform-utils = { path = "crates/waveform-utils" }
 
 itertools = "0.14.0"
 int-enum = "1.2.0"
@@ -62,8 +66,6 @@ num-integer = "0.1.46"
 glam = "0.32.1"
 ordered-float = "5.1.0"
 async-channel = "2.5.0"
-structured-midi = { path = "crates/structured-midi" }
-music-utils = { path = "crates/music-utils" }
 phf = { version = "0.13.1", features = ["macros", "uncased"] }
 enum-ordinalize = "4.3.2"
 serde = { version = "1.0.228", features = ["serde_derive"] }
