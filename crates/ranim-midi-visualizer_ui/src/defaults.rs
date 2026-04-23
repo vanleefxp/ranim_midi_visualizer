@@ -1,5 +1,4 @@
 use eframe::egui;
-use rustysynth::SynthesizerSettings;
 
 use crate::{MidiVisualizerApp, MidiVisualizerAppInner2, tabs::MidiVisualizerTab};
 
@@ -7,12 +6,9 @@ impl Default for MidiVisualizerAppInner2 {
     fn default() -> Self {
         Self {
             midi_file: None,
-            soundfont_file: None,
-            synth_settings: SynthesizerSettings::new(44100),
-            audio_device_idx: 0,
-
             music: Default::default(),
-            soundfont: None,
+            synth: None,
+            audio_device_idx: 0,
 
             visualizer_config: Default::default(),
             clear_color: egui::Color32::from_rgb(0x28, 0x2c, 0x34), // #282c34

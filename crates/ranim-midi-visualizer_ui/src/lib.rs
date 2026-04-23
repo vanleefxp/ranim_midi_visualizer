@@ -23,7 +23,7 @@ use ranim::{
 };
 use ranim_midi_visualizer_lib::{ColorBy, midi_visualizer_scene};
 use ranim_midi_visualizer_math::func::LadderFn;
-use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
+use waveform_utils::synth::Synthesizer;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -58,21 +58,19 @@ pub(crate) struct MidiVisualizerAppCache {
     added_tab: RefCell<Option<(MidiVisualizerTab, egui_dock::NodePath)>>,
     // synth: RefCell<Option<Synthesizer>>,
     visible_tabs: RefCell<HashMap<MidiVisualizerTab, egui_dock::NodePath>>,
-    synth: RefCell<Option<Arc<Mutex<Synthesizer>>>>,
 }
 
-#[derive(Clone, Derivative)]
-#[derivative(Debug)]
+#[derive(Derivative)]
+#[derivative(Clone, Debug)]
 pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) midi_file: Option<PathBuf>,
-    pub(crate) soundfont_file: Option<PathBuf>,
-    pub(crate) synth_settings: SynthesizerSettings,
+    #[derivative(Debug = "ignore")]
+    pub(crate) synth: Option<Arc<Mutex<dyn Synthesizer<i8>>>>,
     pub(crate) audio_device_idx: isize,
 
     /// the displaying MIDI music
     pub(crate) music: Arc<MidiMusic>,
     /// soundfont for playing MIDI notes
-    pub(crate) soundfont: Option<Arc<SoundFont>>,
 
     /// configuration of the MIDI visualizer
     pub(crate) visualizer_config: MidiVisualizerConfig,
@@ -1099,81 +1097,6 @@ impl MidiVisualizerAppInner {
                     }
                 });
                 ui.end_row();
-            }
-
-            // Soundfont
-            {
-                ui.label("Soundfont: ");
-                ui.horizontal(|ui| {
-                    if ui.button(egui_phosphor::regular::FOLDER_OPEN).clicked() {
-                        self.show_load_soundfont_dialog();
-                    }
-                    match &self.soundfont_file {
-                        Some(path) => {
-                            ui.label(
-                                path.file_name()
-                                    .map(|u| u.display().to_string())
-                                    .unwrap_or_else(|| "".to_string()),
-                            );
-                        }
-                        None => {
-                            ui.label("(None)");
-                        }
-                    }
-                });
-                ui.end_row();
-            }
-
-            // Sample rate
-            {
-                ui.label("Sample rate: ");
-                let value = &mut self.synth_settings.sample_rate;
-                const COMMON_SAMPLE_RATES: [u32; 12] = [
-                    8000, 11025, 16000, 22050, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
-                    384000,
-                ];
-                // [TODO] make this an editable combo box which supports custom input
-                egui::ComboBox::from_id_salt("sample_rate_combo")
-                    .selected_text(format!("{} Hz", value))
-                    .show_ui(ui, |ui| {
-                        for selected_value in COMMON_SAMPLE_RATES {
-                            ui.selectable_value(
-                                value,
-                                selected_value,
-                                format!("{} Hz", selected_value),
-                            );
-                        }
-                    });
-                ui.end_row();
-            }
-
-            // Block size
-            {
-                ui.label("Block size:");
-                let value = &mut self.synth_settings.block_size;
-                egui::DragValue::new(value)
-                    .range(16..=1024)
-                    .update_while_editing(false)
-                    .ui(ui);
-                ui.end_row();
-            }
-
-            // Maximum polyphony
-            {
-                ui.label("Max polyphony:");
-                let value = &mut self.synth_settings.maximum_polyphony;
-                egui::DragValue::new(value)
-                    .range(1..=64)
-                    .update_while_editing(false)
-                    .ui(ui);
-                ui.end_row();
-            }
-
-            // enable reverb and chorus
-            {
-                ui.label("");
-                let value = &mut self.synth_settings.enable_reverb_and_chorus;
-                ui.checkbox(value, "Enable reverb and chorus");
             }
         });
     }

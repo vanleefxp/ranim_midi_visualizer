@@ -1,13 +1,12 @@
 use std::{
     cell::Ref,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use ranim::{Output, cmd::preview::Resolution};
 use ranim_midi_visualizer_math::func::LadderFn;
-use rustysynth::{SoundFont, Synthesizer};
 use structured_midi::MidiMusic;
 
 use crate::{
@@ -82,16 +81,6 @@ impl MidiVisualizerAppInner {
             .map(|(_, &v)| v)
             .unwrap_or(0)
     }
-
-    pub(crate) fn synth(&self) -> Option<Arc<Mutex<Synthesizer>>> {
-        if self.cache.synth.borrow().is_none()
-            && let Some(soundfont) = &self.inner.soundfont
-            && let Ok(synth) = Synthesizer::new(soundfont, &self.inner.synth_settings)
-        {
-            self.cache.synth.replace(Some(Arc::new(Mutex::new(synth))));
-        }
-        self.cache.synth.borrow().as_ref().cloned()
-    }
 }
 
 impl MidiVisualizerApp {
@@ -144,12 +133,6 @@ impl MidiVisualizerApp {
     #[inline(always)]
     pub fn audio_device(&self) -> Option<&cpal::Device> {
         self.inner.audio_device()
-    }
-
-    /// MIDI soundfont synthesizer, if there is any.
-    #[inline(always)]
-    pub fn synth(&self) -> Option<Arc<Mutex<Synthesizer>>> {
-        self.inner.synth()
     }
 }
 
@@ -260,28 +243,6 @@ impl MidiVisualizerAppInner2 {
             Err(err) => {
                 self.show_error_dialog(err);
             }
-        }
-    }
-
-    pub(crate) fn show_load_soundfont_dialog(&mut self) {
-        let fd = rfd::FileDialog::new()
-            .add_filter("Soundfont file", &["sf2", "sf3"])
-            .add_filter("All", &["*"]);
-        if let Some(path) = fd.pick_file() {
-            self.load_soundfont_file(&path);
-        }
-    }
-
-    pub(crate) fn load_soundfont_file(&mut self, path: &PathBuf) {
-        match std::fs::File::open(path) {
-            Ok(ref mut file) => match SoundFont::new(file) {
-                Ok(soundfont) => {
-                    self.soundfont = Some(Arc::new(soundfont));
-                    self.soundfont_file = Some(path.clone());
-                }
-                Err(err) => self.show_error_dialog(err),
-            },
-            Err(err) => self.show_error_dialog(err),
         }
     }
 
@@ -405,18 +366,6 @@ impl MidiVisualizerApp {
     #[inline(always)]
     pub fn load_midi_bytes(&mut self, src: &[u8]) {
         self.inner.load_midi_bytes(src);
-    }
-
-    /// Show the open file dialog to load a soundfont file.
-    #[inline(always)]
-    pub fn show_load_soundfont_dialog(&mut self) {
-        self.inner.show_load_soundfont_dialog();
-    }
-
-    /// Load a soundfont file from a path. This will not open a dialog.
-    #[inline(always)]
-    pub fn load_soundfont_file(&mut self, path: &PathBuf) {
-        self.inner.load_soundfont_file(path);
     }
 
     /// Show the open file dialog to load a style config TOML file.
