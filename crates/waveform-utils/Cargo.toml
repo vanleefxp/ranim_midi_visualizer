@@ -9,3 +9,7 @@ version.workspace = true
 [dependencies]
 derivative = { workspace = true }
 cpal = { workspace = true }
+num-complex = { workspace = true, optional = true }
+
+[features]
+harmonic-series = ["dep:num-complex"]

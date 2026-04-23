@@ -17,7 +17,10 @@ where
     fn stop_note(&mut self, note: &Note);
     /// Stop all notes.
     fn stop(&mut self);
-    fn play(&mut self);
+    /// Pause the playback. All currently sounding notes will continue to sound when [`Synth::play`] is called.
     fn pause(&mut self);
+    /// Resume the playback. All notes sounding when [`Synth::pause`] was called will continue to sound.
+    fn play(&mut self);
+    /// Write the currently generated sound to the audio buffer.
     fn write_to_buffer(&mut self, config: &cpal::StreamConfig, buffer: &mut [Sample]);
 }

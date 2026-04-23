@@ -53,6 +53,9 @@ tracing = "0.1.44"
 tracing-indicatif = "0.3.14"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
+num-integer = "0.1.46"
+num-complex = "0.4.6"
+
 ranim_music = { path = "crates/ranim_music" }
 ranim-midi-visualizer_math = { path = "crates/ranim-midi-visualizer_math" }
 structured-midi = { path = "crates/structured-midi" }
@@ -62,7 +65,6 @@ waveform-utils = { path = "crates/waveform-utils" }
 itertools = "0.14.0"
 int-enum = "1.2.0"
 rfd = "0.17.2"
-num-integer = "0.1.46"
 glam = "0.32.1"
 ordered-float = "5.1.0"
 async-channel = "2.5.0"

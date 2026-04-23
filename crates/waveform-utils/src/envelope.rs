@@ -9,6 +9,18 @@ pub trait Envelope {
     fn release_time(&self) -> f64;
 }
 
+impl<T: Fn(f64) -> f64> Envelope for T {
+    fn on_attack(&self, t: f64) -> f64 {
+        self(t)
+    }
+    fn on_release(&self, _t: f64) -> f64 {
+        0.
+    }
+    fn release_time(&self) -> f64 {
+        0.
+    }
+}
+
 /// An empty envelope. Has constant volume level `1.0` while the sound is playing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct NoEnvelope;

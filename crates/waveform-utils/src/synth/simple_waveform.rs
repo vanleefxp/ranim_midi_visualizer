@@ -5,10 +5,9 @@ use derivative::Derivative;
 
 use super::Synth;
 use crate::{
-    Waveform,
+    waveform::{Waveform, sine},
     envelope::{Envelope, NoEnvelope},
     freq::ToFrequency,
-    sine,
 };
 
 #[derive(Clone)]
