@@ -1,6 +1,6 @@
 use std::f64::consts::{FRAC_1_SQRT_2, PI, SQRT_2, SQRT_3};
 
-const SQRT_6: f64 = SQRT_2 * SQRT_3;
+pub(crate) const SQRT_6: f64 = SQRT_2 * SQRT_3;
 
 pub trait Waveform {
     /// Evaluate the waveform at time $t$. $t$ is the normalized time in range $[0, 1]$
@@ -22,9 +22,35 @@ impl<T: Fn(f64) -> f64> Waveform for T {
     }
 }
 
+/// Automatically generate [`FnMut`] and [`FnOnce`] implementations for types implemented [`Fn`]
+/// [TODO] maybe make this a derive macro or proc macro?
+macro auto_fn_impl($t: ty, $args: ty, $output: ty$(,)?) {
+    impl FnMut<$args> for $t {
+        extern "rust-call" fn call_mut(&mut self, args: $args) -> Self::Output {
+            self.call(args)
+        }
+    }
+    impl FnOnce<$args> for $t {
+        type Output = $output;
+        extern "rust-call" fn call_once(self, args: $args) -> Self::Output {
+            self.call(args)
+        }
+    }
+}
+
 /// Sine wave.
 pub fn sine(t: f64) -> f64 {
     (2. * PI * t).sin()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sine;
+
+auto_fn_impl!(Sine, (f64,), f64);
+impl Fn<(f64,)> for Sine {
+    extern "rust-call" fn call(&self, args: (f64,)) -> Self::Output {
+        sine(args.0)
+    }
 }
 
 /// Square wave. Maximum is $sqrt(2) / 2$ so that it has $L^2$ norm $1/2$.
@@ -33,6 +59,15 @@ pub fn square(t: f64) -> f64 {
         ..0.5 => FRAC_1_SQRT_2,
         0.5.. => -FRAC_1_SQRT_2,
         _ => 0.,
+    }
+}
+
+pub struct Square;
+
+auto_fn_impl!(Square, (f64,), f64);
+impl Fn<(f64,)> for Square {
+    extern "rust-call" fn call(&self, args: (f64,)) -> Self::Output {
+        square(args.0)
     }
 }
 
@@ -45,9 +80,27 @@ pub fn triangle(t: f64) -> f64 {
     }
 }
 
+pub struct Triangle;
+
+auto_fn_impl!(Triangle, (f64,), f64);
+impl Fn<(f64,)> for Triangle {
+    extern "rust-call" fn call(&self, args: (f64,)) -> Self::Output {
+        triangle(args.0)
+    }
+}
+
 /// Sawtooth wave. Maximum is $sqrt(6) / 2$ so that it has $L^2$ norm $1/2$.
 pub fn sawtooth(t: f64) -> f64 {
     (0.5 - t) * SQRT_6
+}
+
+pub struct Sawtooth;
+
+auto_fn_impl!(Sawtooth, (f64,), f64);
+impl Fn<(f64,)> for Sawtooth {
+    extern "rust-call" fn call(&self, args: (f64,)) -> Self::Output {
+        sawtooth(args.0)
+    }
 }
 
 /// Pulse wave. Maximum is $sqrt(2) / 2$ so that it has $L^2$ norm $1/2$.

@@ -1,5 +1,5 @@
-mod simple_waveform;
-pub use simple_waveform::*;
+mod simple;
+pub use simple::*;
 
 /// A trait for a synthesizer that can play notes and write the resulting sound to a buffer.
 pub trait Synth<Note = i8, Sample = f32>: Send + Sync
