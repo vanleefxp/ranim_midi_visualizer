@@ -1,3 +1,5 @@
+use derivative::Derivative;
+
 pub trait Envelope {
     /// Returns the volume level at time `t` (in seconds) starting from the moment the sound is triggered.
     /// The return value should be in the range `0.0..=1.0` where `1.0` represents the maximum volume.
@@ -171,5 +173,24 @@ impl From<Fading> for ADSR {
             sustain: 1.,
             release: fade_out,
         }
+    }
+}
+
+/// An exponential decay envelope.
+/// The only controllable parameter is the decay magnitude $lambda$.
+/// The envelope is described by $f(t) = upright(e)^(- lambda t)$.
+#[derive(Derivative)]
+#[derivative(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ExpDecay(#[derivative(Default(value = "1.0"))] pub f64);
+
+impl Envelope for ExpDecay {
+    fn on_attack(&self, t: f64) -> f64 {
+        (-t * self.0).exp()
+    }
+    fn on_release(&self, _t: f64) -> f64 {
+        0.
+    }
+    fn release_time(&self) -> f64 {
+        0.
     }
 }

@@ -22,9 +22,9 @@ impl<T: Fn(f64) -> f64> Waveform for T {
     }
 }
 
-/// Automatically generate [`FnMut`] and [`FnOnce`] implementations for types implemented [`Fn`]
-/// [TODO] maybe make this a derive macro or proc macro?
-macro auto_fn_impl($t: ty, $args: ty, $output: ty$(,)?) {
+/// Automatically generate [`FnMut`] and [`FnOnce`] implementations for types implemented [`Fn`].
+// [TODO] maybe make this a derive macro or proc macro?
+pub(crate) macro auto_fn_impl($t: ty, $args: ty, $output: ty$(,)?) {
     impl FnMut<$args> for $t {
         extern "rust-call" fn call_mut(&mut self, args: $args) -> Self::Output {
             self.call(args)

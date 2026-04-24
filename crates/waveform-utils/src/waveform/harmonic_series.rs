@@ -4,7 +4,7 @@ use std::{
     sync::RwLock,
 };
 
-use crate::waveform::{SQRT_6, Sawtooth, Sine, Square, Triangle};
+use crate::waveform::{SQRT_6, Sawtooth, Sine, Square, Triangle, auto_fn_impl};
 
 pub trait FourierCoef {
     /// Returns the $n$-th fourier coefficient of a waveform, defined by
@@ -134,6 +134,7 @@ impl FourierCoef for HarmonicSeries {
     }
 }
 
+auto_fn_impl!(HarmonicSeries, (f64,), f64);
 impl Fn<(f64,)> for HarmonicSeries {
     extern "rust-call" fn call(&self, args: (f64,)) -> Self::Output {
         (self
@@ -145,18 +146,5 @@ impl Fn<(f64,)> for HarmonicSeries {
             .sum::<c64>()
             / self.correction())
         .im
-    }
-}
-
-impl FnMut<(f64,)> for HarmonicSeries {
-    extern "rust-call" fn call_mut(&mut self, args: (f64,)) -> Self::Output {
-        self.call(args)
-    }
-}
-
-impl FnOnce<(f64,)> for HarmonicSeries {
-    type Output = f64;
-    extern "rust-call" fn call_once(self, args: (f64,)) -> Self::Output {
-        self.call(args)
     }
 }
