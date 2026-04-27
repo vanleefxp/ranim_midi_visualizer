@@ -11,6 +11,7 @@ use ranim::{Output, cmd::preview::Resolution};
 use ranim_midi_visualizer_math::func::LadderFn;
 use structured_midi::MidiMusic;
 use tracing::{error, info};
+use waveform_utils::synth::MusicDirective;
 
 use crate::{
     AUDIO_DEVICES, MidiVisualizerApp, MidiVisualizerAppInner, MidiVisualizerAppInner2,
@@ -143,7 +144,10 @@ impl MidiVisualizerApp {
 
 impl MidiVisualizerAppInner2 {
     pub(crate) fn play(&mut self) {
-        self.synth.lock().unwrap().play();
+        self.synth
+            .lock()
+            .unwrap()
+            .directive(MusicDirective::PlayPause(true));
         if self.time >= self.music.duration() {
             self.time = 0;
             self.play_start_t = Some(Instant::now());
@@ -157,7 +161,10 @@ impl MidiVisualizerAppInner2 {
 
     pub(crate) fn pause(&mut self) {
         self.play_start_t = None;
-        self.synth.lock().unwrap().pause();
+        self.synth
+            .lock()
+            .unwrap()
+            .directive(MusicDirective::PlayPause(false));
         self.test_sound_playing = false;
     }
 

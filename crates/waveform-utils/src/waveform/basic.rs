@@ -1,8 +1,11 @@
-use std::f64::consts::{FRAC_1_SQRT_2, PI, SQRT_2, SQRT_3};
+use std::{
+    any::Any,
+    f64::consts::{FRAC_1_SQRT_2, PI, SQRT_2, SQRT_3},
+};
 
 pub(crate) const SQRT_6: f64 = SQRT_2 * SQRT_3;
 
-pub trait Waveform {
+pub trait Waveform: Any {
     /// Evaluate the waveform at time $t$. $t$ is the normalized time in range $[0, 1]$
     /// where 0 is the start of the waveform and 1 is the end of the waveform.
     /// When inputting a $t$ value out of range the result is undefined. Conventionally the waveform function should
@@ -16,7 +19,7 @@ pub trait Waveform {
     }
 }
 
-impl<T: Fn(f64) -> f64> Waveform for T {
+impl<T: Fn(f64) -> f64 + 'static> Waveform for T {
     fn eval(&self, t: f64) -> f64 {
         self(t)
     }

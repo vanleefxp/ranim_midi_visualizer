@@ -14,7 +14,7 @@ use crate::{
 use async_channel::Receiver;
 use cpal::traits::{DeviceTrait, HostTrait};
 use derivative::Derivative;
-use eframe::egui::{self, FontData, Widget as _};
+use eframe::egui::{self, FontData, RichText, Widget as _};
 use egui_dock::TabViewer as _;
 use enum_ordinalize::Ordinalize;
 use ranim::{
@@ -32,7 +32,7 @@ use std::{
 };
 use structured_midi::MidiMusic;
 use tracing::{error, info};
-use waveform_utils::synth::Synth;
+use waveform_utils::synth::{NoteDirective, Synth};
 
 #[allow(unused)]
 enum ExportProgress {
@@ -68,7 +68,7 @@ pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) synth: Arc<Mutex<dyn Synth>>,
     pub(crate) audio_device_idx: isize,
     pub(crate) test_sound_playing: bool,
-    pub(crate) notes_on: HashSet<i8>,
+    pub(crate) notes_on: HashMap<i8, f64>,
 
     /// the displaying MIDI music
     pub(crate) music: Arc<MidiMusic>,
@@ -302,22 +302,27 @@ impl eframe::App for MidiVisualizerApp {
                 .inner
                 .music
                 .notes_between_iter(&time_range, &..)
-                .map(|(_, note)| note.key)
-                .collect::<HashSet<_>>();
+                .map(|(_, note)| (note.key, note.vel as f64 / 127.))
+                .collect::<HashMap<_, _>>();
             let started_notes = new_notes_on
                 .iter()
-                .copied()
-                .filter(|v| !notes_on.contains(v));
+                .filter(|(k, _)| !notes_on.contains_key(k));
             let stopped_notes = notes_on
                 .iter()
-                .copied()
-                .filter(|v| !new_notes_on.contains(v));
+                .filter_map(|(k, _)| {
+                    if new_notes_on.contains_key(k) {
+                        None
+                    } else {
+                        Some(k)
+                    }
+                })
+                .collect::<HashSet<_>>();
             let mut synth = self.inner.inner.synth.lock().unwrap();
-            for note in started_notes {
-                synth.attack(note, 0.5);
+            for (&pitch, &volume) in started_notes {
+                synth.directive(NoteDirective { pitch, volume }.into());
             }
-            for note in stopped_notes {
-                synth.release(&note);
+            for &pitch in stopped_notes {
+                synth.directive(NoteDirective { pitch, volume: 0. }.into());
             }
             *notes_on = new_notes_on;
         }
@@ -1055,88 +1060,136 @@ impl MidiVisualizerAppInner {
     }
 
     fn audio_settings_ui(&mut self, ui: &mut egui::Ui) {
-        egui::Grid::new("audio_grid").show(ui, |ui| {
-            // Audio device
-            {
-                ui.label("Audio device:");
+        egui::CollapsingHeader::new(
+            RichText::new(format!(
+                "{} Audio Device",
+                egui_phosphor::regular::MICROPHONE
+            ))
+            .heading(),
+        )
+        .show(ui, |ui| {
+            egui::Grid::new("audio_grid").show(ui, |ui| {
+                // Audio device
+                {
+                    ui.label("Audio device:");
 
-                let device_type_to_icon = |device_type: cpal::DeviceType| {
-                    use cpal::DeviceType::*;
-                    use egui_phosphor::regular::*;
-                    match device_type {
-                        Speaker => SPEAKER_HIGH,
-                        Microphone => MICROPHONE,
-                        Headphones => HEADPHONES,
-                        Headset => HEADSET,
-                        Earpiece => DEVICE_MOBILE,
-                        Handset => PHONE_CALL,
-                        HearingAid => HEADPHONES,
-                        Dock => FADERS,
-                        Tuner => WAVE_SINE,
-                        Virtual => DESKTOP_TOWER,
-                        _ => QUESTION_MARK,
-                    }
-                };
+                    let device_type_to_icon = |device_type: cpal::DeviceType| {
+                        use cpal::DeviceType::*;
+                        use egui_phosphor::regular::*;
+                        match device_type {
+                            Speaker => SPEAKER_HIGH,
+                            Microphone => MICROPHONE,
+                            Headphones => HEADPHONES,
+                            Headset => HEADSET,
+                            Earpiece => DEVICE_MOBILE,
+                            Handset => PHONE_CALL,
+                            HearingAid => HEADPHONES,
+                            Dock => FADERS,
+                            Tuner => WAVE_SINE,
+                            Virtual => DESKTOP_TOWER,
+                            _ => QUESTION_MARK,
+                        }
+                    };
 
-                let device_display_string = |device: &cpal::Device| {
-                    if let Ok(desc) = device.description() {
-                        format!(
-                            "{} {}",
-                            device_type_to_icon(desc.device_type()),
-                            desc.name()
-                        )
-                    } else {
-                        format!(
-                            "{} (Unknown device)",
-                            device_type_to_icon(cpal::DeviceType::Unknown)
-                        )
-                    }
-                };
-
-                ui.horizontal(|ui| {
-                    // Device combo box
-                    {
-                        let value = &mut self.inner.audio_device_idx;
-                        egui::ComboBox::from_id_salt("audio_device_combo")
-                            .selected_text(
-                                AUDIO_DEVICES
-                                    .get(*value as usize)
-                                    .map(device_display_string)
-                                    .unwrap_or_else(|| "(None)".to_string()),
+                    let device_display_string = |device: &cpal::Device| {
+                        if let Ok(desc) = device.description() {
+                            format!(
+                                "{} {}",
+                                device_type_to_icon(desc.device_type()),
+                                desc.name()
                             )
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(value, -1, "(None)");
-                                for (idx, device) in AUDIO_DEVICES.iter().enumerate() {
-                                    ui.selectable_value(
-                                        value,
-                                        idx as isize,
-                                        device_display_string(device),
-                                    );
+                        } else {
+                            format!(
+                                "{} (Unknown device)",
+                                device_type_to_icon(cpal::DeviceType::Unknown)
+                            )
+                        }
+                    };
+
+                    ui.horizontal(|ui| {
+                        // Device combo box
+                        {
+                            let value = &mut self.inner.audio_device_idx;
+                            egui::ComboBox::from_id_salt("audio_device_combo")
+                                .selected_text(
+                                    AUDIO_DEVICES
+                                        .get(*value as usize)
+                                        .map(device_display_string)
+                                        .unwrap_or_else(|| "(None)".to_string()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(value, -1, "(None)");
+                                    for (idx, device) in AUDIO_DEVICES.iter().enumerate() {
+                                        ui.selectable_value(
+                                            value,
+                                            idx as isize,
+                                            device_display_string(device),
+                                        );
+                                    }
+                                });
+                        }
+
+                        // Test button
+                        {
+                            ui.add_enabled_ui(self.audio_device().is_some(), |ui| {
+                                let resp = ui.toggle_value(
+                                    &mut self.inner.test_sound_playing,
+                                    egui_phosphor::regular::HEADPHONES,
+                                );
+                                if resp.changed() {
+                                    // play a 440 Hz sine wave to test the audio device
+                                    // let mut synth = self.inner.synth.lock().unwrap();
+                                    // if self.inner.test_sound_playing {
+                                    //     synth.attack(9, 1.0);
+                                    // } else {
+                                    //     synth.release(&9);
+                                    // }
                                 }
                             });
-                    }
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+        });
+        egui::CollapsingHeader::new(
+            RichText::new(format!(
+                "{} Synthesizer",
+                egui_phosphor::regular::PIANO_KEYS
+            ))
+            .heading(),
+        )
+        .show(ui, |_ui| {
+            // let synth = &mut *(self.inner.synth.lock().unwrap()) as &mut dyn Any;
+            // if let Some(simple_synth) = synth.downcast_mut::<SimpleWaveformSynth>() {
+            //     egui::Grid::new("simple_synth_grid").show(ui, |ui| {
+            //         ui.label("Waveform: ");
+            //         const WAVEFORMS: LazyLock<[Arc<dyn Waveform>; 4]> = LazyLock::new(|| [
+            //             Arc::new(Sine),
+            //             Arc::new(Square),
+            //             Arc::new(Triangle),
+            //             Arc::new(Sawtooth),
+            //         ]);
+            //         const WAVEFORM_TYPES: [TypeId; 4] = [
+            //             TypeId::of::<Sine>(),
+            //             TypeId::of::<Square>(),
+            //             TypeId::of::<Triangle>(),
+            //             TypeId::of::<Sawtooth>(),
+            //         ];
+            //         const WAVEFORM_TYPE_ICONS: [&str; 4] = [
+            //             egui_phosphor::regular::WAVE_SINE,
+            //             egui_phosphor::regular::WAVE_SQUARE,
+            //             egui_phosphor::regular::WAVE_TRIANGLE,
+            //             egui_phosphor::regular::WAVE_SAWTOOTH,
+            //         ];
 
-                    // Test button
-                    {
-                        ui.add_enabled_ui(self.audio_device().is_some(), |ui| {
-                            let resp = ui.toggle_value(
-                                &mut self.inner.test_sound_playing,
-                                egui_phosphor::regular::HEADPHONES,
-                            );
-                            if resp.changed() {
-                                // play a 440 Hz sine wave to test the audio device
-                                let mut synth = self.inner.synth.lock().unwrap();
-                                if self.inner.test_sound_playing {
-                                    synth.attack(9, 1.0);
-                                } else {
-                                    synth.release(&9);
-                                }
-                            }
-                        });
-                    }
-                });
-                ui.end_row();
-            }
+            //         egui::ComboBox::from_id_salt("simple_synth_waveform_combo").show_ui(ui, |ui| {
+            //             for (&waveform_type, icon) in WAVEFORM_TYPES.iter().zip(WAVEFORM_TYPE_ICONS) {
+
+            //             }
+            //         });
+            //     });
+            // }
         });
     }
 }

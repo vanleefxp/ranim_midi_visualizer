@@ -1,6 +1,8 @@
+use std::any::Any;
+
 use derivative::Derivative;
 
-pub trait Envelope {
+pub trait Envelope: Any {
     /// Returns the volume level at time `t` (in seconds) starting from the moment the sound is triggered.
     /// The return value should be in the range `0.0..=1.0` where `1.0` represents the maximum volume.
     fn on_attack(&self, t: f64) -> f64;
@@ -11,7 +13,7 @@ pub trait Envelope {
     fn release_time(&self) -> f64;
 }
 
-impl<T: Fn(f64) -> f64> Envelope for T {
+impl<T: Fn(f64) -> f64 + 'static> Envelope for T {
     fn on_attack(&self, t: f64) -> f64 {
         self(t)
     }

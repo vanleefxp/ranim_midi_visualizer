@@ -1,26 +1,46 @@
 mod simple;
+
+use std::any::Any;
+
+use crate::freq::ToFrequency;
 pub use simple::*;
 
-/// A trait for a synthesizer that can play notes and write the resulting sound to a buffer.
-pub trait Synth<Note = i8, Sample = f32>: Send + Sync
-where
-    Sample: cpal::SizedSample + cpal::FromSample<f64>,
-{
-    /// Trigger a note with the given volume.
-    fn attack(&mut self, note: Note, volume: f64);
-    /// Release a note. Different from [`Synthesizer::stop`], the note may still last for a while and gradually fade
-    /// out.
-    fn release(&mut self, note: &Note) {
-        self.stop_note(note);
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MusicDirective<Pitch: ToFrequency = i8> {
+    Note(NoteDirective<Pitch>),
+    // Control(Controller),
+    PlayPause(bool),
+    Stop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoteDirective<Pitch: ToFrequency> {
+    pub pitch: Pitch,
+    pub volume: f64,
+}
+
+impl<Pitch: ToFrequency> From<NoteDirective<Pitch>> for MusicDirective<Pitch> {
+    fn from(value: NoteDirective<Pitch>) -> Self {
+        MusicDirective::Note(value)
     }
-    /// Stop a note immediately so that it makes no sound since the current moment.
-    fn stop_note(&mut self, note: &Note);
-    /// Stop all notes.
-    fn stop(&mut self);
-    /// Pause the playback. All currently sounding notes will continue to sound when [`Synth::play`] is called.
-    fn pause(&mut self);
-    /// Resume the playback. All notes sounding when [`Synth::pause`] was called will continue to sound.
-    fn play(&mut self);
+}
+
+/// A trait for a synthesizer that can play notes and write the resulting sound to a buffer.
+pub trait Synth<Directive = MusicDirective, Sample = f32>: Send + Sync + Any {
+    /// Send directive to the synthesizer.
+    fn directive(&mut self, directive: Directive);
     /// Write the currently generated sound to the audio buffer.
     fn write_to_buffer(&mut self, config: &cpal::StreamConfig, buffer: &mut [Sample]);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
