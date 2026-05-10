@@ -7,9 +7,14 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+midly = { workspace = true }
 derivative = { workspace = true }
 cpal = { workspace = true }
 num-complex = { workspace = true, optional = true }
+typed_floats = { workspace = true }
+derive_more = { workspace = true }
+simple-interval-tree = { workspace = true }
+smallvec = { workspace = true }
 
 [features]
 harmonic-series = ["dep:num-complex"]

@@ -7,7 +7,7 @@ edition = "2024"
 ranim = { workspace = true }
 ranim-midi-visualizer_math = { workspace = true }
 
-midly = "0.5.3"
+midly = { workspace = true }
 serde = { version = "1.0.228", optional = true }
 itertools = { workspace = true }
 int-enum = { workspace = true }

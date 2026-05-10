@@ -1,0 +1,10 @@
+[package]
+name = "simple-interval-tree"
+description = "A simple implementation of interval tree using two `BTreeMap`s."
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+smallvec = { workspace = true }

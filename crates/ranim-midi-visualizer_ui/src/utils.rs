@@ -3,12 +3,15 @@
 use std::ops::Range;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
-use eframe::egui;
+use eframe::egui::{self, ahash::HashMap};
 use ranim::{
     color::{AlphaColor, Rgba8, Srgb},
     core::{components::width::Width, num::Integer as _},
     glam::{DVec2, dvec2},
-    items::vitem::text::TextFont as RanimTextFont,
+    items::vitem::text::{
+        FontStretch, FontStyle as RanimFontStyle, FontVariant as RanimFontVariant, FontWeight,
+        TextFont as RanimTextFont,
+    },
 };
 use ranim_midi_visualizer_lib::{
     ColorBy, MidiVisualizerConfig as RanimMidiVisualizerConfig,
@@ -128,6 +131,27 @@ pub struct MidiVisualizerConfig {
     pub time_window: u64,
     #[serde(skip)] // [TODO] make this field savable
     pub text_font: RanimTextFont,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum FontStyle {
+    Normal,
+    Italic,
+    Oblique,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct FontVariant {
+    style: FontStyle,
+    weight: u16,
+    stretch: u16,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TextFont {
+    famlies: Vec<String>,
+    variant: FontVariant,
+    features: HashMap<String, u32>,
 }
 
 impl From<RanimPianoKeyboardColor> for PianoKeyboardColor {
@@ -323,5 +347,61 @@ impl From<MidiVisualizerConfig> for RanimMidiVisualizerConfig {
 impl Default for MidiVisualizerConfig {
     fn default() -> Self {
         Self::from(RanimMidiVisualizerConfig::default())
+    }
+}
+
+impl From<RanimFontStyle> for FontStyle {
+    fn from(value: RanimFontStyle) -> Self {
+        match value {
+            RanimFontStyle::Normal => FontStyle::Normal,
+            RanimFontStyle::Italic => FontStyle::Italic,
+            RanimFontStyle::Oblique => FontStyle::Oblique,
+        }
+    }
+}
+
+impl From<FontStyle> for RanimFontStyle {
+    fn from(value: FontStyle) -> Self {
+        match value {
+            FontStyle::Normal => RanimFontStyle::Normal,
+            FontStyle::Italic => RanimFontStyle::Italic,
+            FontStyle::Oblique => RanimFontStyle::Oblique,
+        }
+    }
+}
+
+impl From<RanimFontVariant> for FontVariant {
+    fn from(value: RanimFontVariant) -> Self {
+        let RanimFontVariant {
+            style,
+            weight,
+            stretch,
+        } = value;
+        let style = style.into();
+        let weight = weight.to_number();
+        let stretch = (stretch.to_ratio().get() * 1000.) as u16;
+        FontVariant {
+            style,
+            weight,
+            stretch,
+        }
+    }
+}
+
+impl From<FontVariant> for RanimFontVariant {
+    fn from(value: FontVariant) -> Self {
+        let FontVariant {
+            style,
+            weight,
+            stretch,
+        } = value;
+        let style = style.into();
+        let weight = FontWeight::from_number(weight);
+        let stretch = FontStretch::from_number(stretch);
+        RanimFontVariant {
+            style,
+            weight,
+            stretch,
+        }
     }
 }

@@ -12,7 +12,7 @@ use crate::{
     envelope::{Envelope, ExpDecay},
     freq::ToFrequency,
     synth::{MusicDirective, NoteDirective},
-    waveform::{Waveform, Triangle},
+    waveform::{Triangle, Waveform},
 };
 
 #[derive(Clone)]

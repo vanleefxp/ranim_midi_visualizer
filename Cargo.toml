@@ -15,7 +15,7 @@ version.workspace = true
 [dependencies]
 ranim = { workspace = true, features = ["render", "preview"] }
 anyhow = "1.0.101"
-itertools = "0.14.0"
+itertools = { workspace = true }
 tracing = { workspace = true }
 tracing-indicatif = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -40,6 +40,7 @@ members = [
     "crates/music-utils",
     "crates/ranim-midi-visualizer_math",
     "crates/waveform-utils",
+    "crates/simple-interval-tree",
 ]
 
 [workspace.dependencies]
@@ -61,20 +62,24 @@ ranim-midi-visualizer_math = { path = "crates/ranim-midi-visualizer_math" }
 structured-midi = { path = "crates/structured-midi" }
 music-utils = { path = "crates/music-utils" }
 waveform-utils = { path = "crates/waveform-utils" }
+simple-interval-tree = { path = "crates/simple-interval-tree" }
 
 itertools = "0.14.0"
 int-enum = "1.2.0"
 rfd = "0.17.2"
 glam = "0.32.1"
 ordered-float = "5.1.0"
+typed_floats = "1.0.7"
 async-channel = "2.5.0"
 phf = { version = "0.13.1", features = ["macros", "uncased"] }
 enum-ordinalize = "4.3.2"
 serde = { version = "1.0.228", features = ["serde_derive"] }
 toml = "1.1.2"
 cpal = "0.17.3"
+midly = "0.5.3"
 rustysynth = { git = "https://github.com/vanleefxp/rustysynth_fork.git" }
 derivative = "2.2.0"
+smallvec = "1.15.1"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
