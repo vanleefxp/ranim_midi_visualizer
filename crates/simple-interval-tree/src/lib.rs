@@ -88,7 +88,10 @@ unsafe fn nodes_to_tuples<'a, R: 'a, V: 'a>(
     })
 }
 
-impl<R, V, A> IntervalTree<R, V, A> where A: Allocator {
+impl<R, V, A> IntervalTree<R, V, A>
+where
+    A: Allocator,
+{
     pub fn is_empty(&self) -> bool {
         self.starts.is_empty()
     }
@@ -163,7 +166,9 @@ where
             panic!("Entry is not from this tree!")
         }
         // SAFETY: we are removing a valid node from the tree.
-        unsafe { self.remove_node(entry.node); }
+        unsafe {
+            self.remove_node(entry.node);
+        }
     }
 
     fn nodes_by_start(&self) -> impl Iterator<Item = NonNull<(Range<R>, V)>> {
@@ -187,7 +192,6 @@ where
                     .flat_map(|(_, nodes)| nodes.iter().copied())
                     .filter(|&node| {
                         // SAFETY: all pointers should point to valid nodes.
-                        #[rustfmt::skip]
                         let Range::<R> { start, .. } = unsafe { &(*(node.as_ptr())).0 };
                         // only take nodes whose starting point is before the start of the range
                         // to avoid repetition
@@ -205,14 +209,16 @@ where
             .flat_map(|(_, nodes)| nodes.iter().copied())
             .filter(|&node| {
                 // SAFETY: all pointers should point to valid nodes.
-                #[rustfmt::skip]
                 let Range::<R> { end, .. } = unsafe { &(*(node.as_ptr())).0 };
                 end <= &range.end
             })
     }
 
     pub fn entries_by_start(&self) -> impl Iterator<Item = Entry<R, V, A>> {
-        self.nodes_by_start().map(|node| Entry { tree: self as *const Self, node })
+        self.nodes_by_start().map(|node| Entry {
+            tree: self as *const Self,
+            node,
+        })
     }
 
     /// Returns an iterator over all entries in the tree, ordered by interval starts.
@@ -221,10 +227,39 @@ where
         unsafe { nodes_to_tuples(self.nodes_by_start()) }
     }
 
+    pub fn into_iter_by_start(self) -> impl Iterator<Item = (Range<R>, V)>
+    where
+        A: 'static,
+    {
+        let Self { alloc, starts, .. } = self;
+        starts
+            .into_values()
+            .flat_map(|v| v.into_iter())
+            .map(move |node| {
+                // SAFETY: all pointers should point to valid nodes.
+                let node: Box<(Range<R>, V), _> = unsafe { Box::from_non_null_in(node, &alloc) };
+                *node
+            })
+    }
+
     /// Returns an iterator over all entries in the tree, ordered by interval ends.
     pub fn iter_by_end(&self) -> impl Iterator<Item = (&Range<R>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
         unsafe { nodes_to_tuples(self.nodes_by_end()) }
+    }
+
+    pub fn into_iter_by_end(self) -> impl Iterator<Item = (Range<R>, V)>
+    where
+        A: 'static,
+    {
+        let Self { alloc, ends, .. } = self;
+        ends.into_values()
+            .flat_map(|v| v.into_iter())
+            .map(move |node| {
+                // SAFETY: all pointers should point to valid nodes.
+                let node: Box<(Range<R>, V), _> = unsafe { Box::from_non_null_in(node, &alloc) };
+                *node
+            })
     }
 
     pub fn iter_overlaps(&self, range: &Range<R>) -> impl Iterator<Item = (&Range<R>, &V)>

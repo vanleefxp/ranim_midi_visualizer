@@ -1,37 +1,50 @@
-use std::{collections::{BTreeMap, HashMap}, fmt::Debug};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    ops::{Deref, DerefMut, Range},
+    sync::{MappedRwLockReadGuard, RwLock, RwLockReadGuard},
+};
 
 use derivative::Derivative;
+use ordered_float::OrderedFloat;
+use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use simple_interval_tree::IntervalTree;
 use smallvec::SmallVec;
-use typed_floats::tf64;
+use typed_floats::{NonNaNFinite, tf64};
 
+#[allow(non_camel_case_types)]
+type f64o = OrderedFloat<f64>;
+type Metric = tf64::NonNaNFinite;
 type Velocity = tf64::PositiveFinite;
-type Tempo = tf64::StrictlyPositiveFinite;
+type Tempo = tf64::PositiveFinite;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Derivative)]
 #[derivative(Default)]
-pub struct Note<Pitch = i8, Metric = tf64::NonNaNFinite> {
+pub struct Note<Pitch = i8> {
     /// The pitch of the note.
     pub pitch: Pitch,
     /// The velocity of the note. Should be a value between 0 and 1.
     #[derivative(Default(value = "0.75.try_into().unwrap()"))]
     pub velocity: Velocity,
-    /// A slight offset from the standard start and end positions of the note.
-    pub offset: [Metric; 2],
+    // /// A slight offset from the standard start and end positions of the note.
+    // pub offset: [Metric; 2],
 }
 
 #[derive(Clone)]
-pub struct Voice<Pitch = i8, Metric = tf64::NonNaNFinite> {
+pub struct Voice<Pitch = i8> {
     pub notes: IntervalTree<Metric, Note<Pitch>>,
 }
 
-impl<Pitch, Metric> Debug for Voice<Pitch, Metric> where Pitch: Debug, Metric: Debug + Ord {
+impl<Pitch> Debug for Voice<Pitch>
+where
+    Pitch: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Voice").field("notes", &self.notes).finish()
     }
 }
 
-impl<Pitch, Metric> Default for Voice<Pitch, Metric> {
+impl<Pitch> Default for Voice<Pitch> {
     fn default() -> Self {
         Self {
             notes: IntervalTree::new(),
@@ -39,13 +52,42 @@ impl<Pitch, Metric> Default for Voice<Pitch, Metric> {
     }
 }
 
+impl<Pitch> Voice<Pitch> {
+    fn remap(self, time_map: &SegmentedLinearFn<f64o, f64>) -> Self {
+        let timed_notes = self.notes.into_iter_by_start().map(|(range, note)| {
+            let Range { start, end } = range;
+            let start_time = time_map.eval(&f64o::from(f64::from(start)), true).try_into().unwrap();
+            let end_time = time_map.eval(&f64o::from(f64::from(end)), true).try_into().unwrap();
+            let time_range = start_time..end_time;
+            (time_range, note)
+        }).collect();
+        Self { notes: timed_notes }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct Staff<Pitch = i8, Metric = tf64::NonNaNFinite, Control = PedalControl> {
+pub struct Staff<Pitch = i8, Control = PedalControl> {
     pub voices: Vec<Voice<Pitch>>,
     pub controls: BTreeMap<Metric, SmallVec<[Control; 1]>>,
 }
 
-impl<Pitch, Metric, Control> Default for Staff<Pitch, Metric, Control> {
+impl<Pitch, Control> Staff<Pitch, Control> {
+    fn remap(self, time_map: &SegmentedLinearFn<f64o, f64>) -> Self {
+        let voices = self.voices.into_iter().map(|voice| {
+            voice.remap(time_map)
+        }).collect();
+        let controls = self.controls.into_iter().map(|(beat, controls)| {
+            let time = time_map.eval(&f64o::from(f64::from(beat)), true).try_into().unwrap();
+            (time, controls)
+        }).collect();
+        Self {
+            voices,
+            controls,
+        }
+    }
+}
+
+impl<Pitch, Control> Default for Staff<Pitch, Control> {
     fn default() -> Self {
         Self {
             voices: Vec::new(),
@@ -54,25 +96,111 @@ impl<Pitch, Metric, Control> Default for Staff<Pitch, Metric, Control> {
     }
 }
 
+/// Music without metric information.
 #[derive(Debug, Clone)]
-pub struct Music<Pitch = i8, Metric = tf64::NonNaNFinite, Control = PedalControl> {
+pub struct RawMusic<Pitch = i8, Control = PedalControl> {
+    /// Total duration of the music in beats.
     pub duration: Metric,
-    pub staves: Vec<Staff<Pitch, Metric, Control>>,
-    pub tempo: BTreeMap<Metric, Tempo>,
+    /// The staves / tracks of the music.
+    pub staves: Vec<Staff<Pitch, Control>>,
 }
 
-impl<Pitch, Metric, Control> Default for Music<Pitch, Metric, Control> where Metric: Default + Ord {
+impl<Pitch, Control> Default for RawMusic<Pitch, Control> {
     fn default() -> Self {
         Self {
             duration: Default::default(),
-            staves: Vec::new(),
-            // default tempo is 60 BPM
-            tempo: BTreeMap::from([(Default::default(), 1.0.try_into().unwrap())]),
+            staves: Default::default(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+impl<Pitch, Control> From<Music<Pitch, Control>> for RawMusic<Pitch, Control> {
+    // Convert music with metric-based timing to linear timing, erasing all metric information.
+    fn from(value: Music<Pitch, Control>) -> Self {
+        let Music { inner: RawMusic { duration, staves }, tempo, time_map } = value;
+        let time_map = match time_map.into_inner().unwrap() {
+            Some(v) => v,
+            None => generate_time_map(&tempo),
+        };
+        let duration = NonNaNFinite::try_from(time_map.eval(&f64o::from(f64::from(duration)), true)).unwrap();
+        let staves = staves.into_iter().map(|v| v.remap(&time_map)).collect();
+        
+        Self { duration, staves }
+    }
+}
+
+#[derive(Debug)]
+pub struct Music<Pitch = i8, Control = PedalControl> {
+    inner: RawMusic<Pitch, Control>,
+    /// The tempo curve of the music. Maps beats to tempo values in seconds per beat.
+    pub tempo: LadderFn<Metric, Tempo>,
+
+    // cache fields
+    /// A mapping from metric beats to time in seconds.
+    time_map: RwLock<Option<SegmentedLinearFn<f64o, f64>>>,
+}
+
+impl<Pitch, Control> Clone for Music<Pitch, Control>
+where
+    Pitch: Clone,
+    Control: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            tempo: self.tempo.clone(),
+            // do not clone cache fields
+            time_map: RwLock::new(None),
+        }
+    }
+}
+
+impl<Pitch, Control> Default for Music<Pitch, Control>
+where
+    Metric: Default + Ord,
+{
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+            // default tempo is 60 BPM (1 second per note)
+            tempo: LadderFn::from_iter([(Default::default(), 1.0.try_into().unwrap())]),
+            time_map: RwLock::new(None),
+        }
+    }
+}
+
+impl<Pitch, Control> Deref for Music<Pitch, Control> {
+    type Target = RawMusic<Pitch, Control>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<Pitch, Control> DerefMut for Music<Pitch, Control> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<Pitch, Control> Music<Pitch, Control> {
+    pub fn time_map(&self) -> MappedRwLockReadGuard<'_, SegmentedLinearFn<f64o, f64>> {
+        let mut time_map = self.time_map.write().unwrap();
+        if time_map.is_none() {
+            *time_map = Some(generate_time_map(&self.tempo));
+        }
+        RwLockReadGuard::map(
+            self.time_map.read().unwrap(),
+            |time_map: &Option<SegmentedLinearFn<f64o, f64>>| time_map.as_ref().unwrap(),
+        )
+    }
+
+    pub fn time_at(&self, beat: f64) -> f64 {
+        self.time_map().eval(&f64o::from(beat), true)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Pedal {
     Soft,
     Sostenuto,
@@ -87,9 +215,27 @@ pub struct PedalControl {
     pub depth: tf64::PositiveFinite,
 }
 
+fn generate_time_map(tempo: &LadderFn<Metric, Tempo>) -> SegmentedLinearFn<f64o, f64> {
+    let map = tempo
+        .iter()
+        .scan(
+            (0.0f64, 0.0f64, 1.0f64),
+            |(cur_time, cur_beat, cur_tempo), (&beat, &tempo)| {
+                let point = (f64o::from(*cur_time), *cur_beat);
+                *cur_time += (f64::from(beat) - *cur_beat) * *cur_tempo;
+                *cur_beat = beat.into();
+                *cur_tempo = tempo.into();
+                Some(point)
+            },
+        )
+        .collect();
+    map
+}
+
 pub fn parse_midi(src: &[u8]) -> Result<Music, midly::Error> {
     let (header, track_iter) = midly::parse(src)?;
 
+    // TODO: handle sequential multiple tracks
     let ticks_per_beat = {
         use midly::Timing::*;
         match header.timing {
@@ -140,7 +286,11 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, midly::Error> {
                                 tf64::PositiveFinite::new(velocity.as_int() as f64 / 127.0)
                                     .unwrap();
                             // insert note into the note states table
-                            let note = Note { pitch, velocity, offset: Default::default() };
+                            let note = Note {
+                                pitch,
+                                velocity,
+                                // offset: Default::default(),
+                            };
                             note_states
                                 .entry((voice, pitch))
                                 .or_default()
@@ -173,13 +323,13 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, midly::Error> {
                         }
                         Controller { controller, value } => {
                             use Pedal::*;
-                            let pedal_type = match controller.as_int() {
+                            let pedal = match controller.as_int() {
                                 64 => Some(Sustain),
                                 66 => Some(Sostenuto),
                                 67 => Some(Soft),
                                 _ => None,
                             };
-                            if let Some(pedal) = pedal_type {
+                            if let Some(pedal) = pedal {
                                 let depth =
                                     tf64::PositiveFinite::new(value.as_int() as f64 / 127.0)
                                         .unwrap();
@@ -201,12 +351,11 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, midly::Error> {
                     use midly::MetaMessage::*;
                     match message {
                         Tempo(tempo) => {
-                            // original tempo is in microseconds per quarter note
+                            // SAFETY: original tempo is in microseconds per quarter note
                             // now converted to seconds per beat
-                            // it must be strictly positive
-                            let tempo =
-                                tf64::StrictlyPositiveFinite::try_from(tempo.as_int() as f64 / 1e6)
-                                    .unwrap();
+                            // so it must be positive
+                            let tempo = tf64::PositiveFinite::try_from(tempo.as_int() as f64 / 1e6)
+                                .unwrap();
                             music.tempo.insert(tick_to_beat(cur_tick), tempo);
                         }
                         EndOfTrack => {

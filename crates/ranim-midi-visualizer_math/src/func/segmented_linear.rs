@@ -9,11 +9,16 @@ use std::{
     iter::Sum,
     ops::{Add, AddAssign},
 };
+use typed_floats::{tf32, tf64};
 
 type f32o = OrderedFloat<f32>;
 type f64o = OrderedFloat<f64>;
 
+/// Trait for types that can perform the inverse of interpolation. i.e. find the relative position of a value in the
+/// interpolation range.
 pub trait InvertInterpolatable {
+    /// Returns the relative position (parameter t) of `self` in the interpolation range `start..=end`.
+    /// This is the inverse operation of `lerp`.
     fn t_value(&self, start: &Self, end: &Self) -> f64;
 }
 
@@ -43,6 +48,18 @@ impl InvertInterpolatable for f64o {
     }
 }
 
+impl InvertInterpolatable for tf32::NonNaNFinite {
+    fn t_value(&self, start: &Self, end: &Self) -> f64 {
+        f32::from(*self - *start) as f64 / f32::from(*end - *start) as f64
+    }
+}
+
+impl InvertInterpolatable for tf64::NonNaNFinite {
+    fn t_value(&self, start: &Self, end: &Self) -> f64 {
+        f64::from(*self - *start) / f64::from(*end - *start)
+    }
+}
+
 /// Representation of a continuous segmented linear function.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, AsRef, AsMut, From, Into)]
 pub struct SegmentedLinearFn<X, Y> {
@@ -58,24 +75,48 @@ where
     }
 }
 
-trait XCallRequirement = Ord + InvertInterpolatable;
-trait YCallRequirement = Interpolatable + Clone + Default;
+pub trait XCallRequirement = Ord + InvertInterpolatable;
+pub trait YCallRequirement = Interpolatable + Clone + Default;
 
 impl<X, Y> SegmentedLinearFn<X, Y> {
-    #[inline(always)]
-    fn _call(&self, x: &X) -> Y
+    /// Evaluate the segmented linear function at a given point $x$.
+    /// If `extrapolate` is true, extrapolate the function beyond the range of the data points.
+    pub fn eval(&self, x: &X, extrapolate: bool) -> Y
     where
         X: XCallRequirement,
         Y: YCallRequirement,
     {
-        let prev = self.points.range(..x).next_back();
-        let next = self.points.range(x..).next();
+        let mut prev_iter = self.points.range(..x);
+        let mut next_iter = self.points.range(x..);
+        let prev = prev_iter.next_back();
+        let next = next_iter.next();
         match (prev, next) {
             (Some((x1, y1)), Some((x2, y2))) => {
                 let t = x.t_value(x1, x2);
                 y1.lerp(y2, t)
             }
-            (Some((_, y0)), None) | (None, Some((_, y0))) => y0.clone(),
+            (Some((x2, y2)), None) => {
+                if extrapolate && let Some((x1, y1)) = prev_iter.next_back() {
+                    // extrapolate
+                    let t = x.t_value(x1, x2);
+                    y1.lerp(y2, t)
+                } else {
+                    // only one point
+                    // treat as constant function
+                    y2.clone()
+                }
+            }
+            (None, Some((x1, y1))) => {
+                if extrapolate && let Some((x2, y2)) = next_iter.next() {
+                    // extrapolate
+                    let t = x.t_value(x1, x2);
+                    y1.lerp(y2, t)
+                } else {
+                    // only one point
+                    // treat as constant function
+                    y1.clone()
+                }
+            }
             _ => Y::default(),
         }
     }
@@ -89,7 +130,7 @@ where
     type Output = Y;
 
     extern "rust-call" fn call_once(self, args: (&X,)) -> Self::Output {
-        self._call(args.0)
+        self.call(args)
     }
 }
 
@@ -99,7 +140,7 @@ where
     Y: YCallRequirement,
 {
     extern "rust-call" fn call_mut(&mut self, args: (&X,)) -> Self::Output {
-        self._call(args.0)
+        self.call(args)
     }
 }
 
@@ -109,7 +150,7 @@ where
     Y: YCallRequirement,
 {
     extern "rust-call" fn call(&self, args: (&X,)) -> Self::Output {
-        self._call(args.0)
+        self.eval(args.0, false)
     }
 }
 
@@ -247,3 +288,14 @@ mod tests {
         dbg!(&h);
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////

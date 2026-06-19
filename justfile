@@ -1,7 +1,7 @@
 set shell := ["powershell"]
 
 install:
-	cargo install --path .
+	cargo install --path . --locked
 
 run *args:
 	cargo run {{ args }}

@@ -58,7 +58,7 @@ impl Default for StatusBarConfig {
         Self {
             em_size: 0.2,
             padding: [dvec2(0.1, 0.1), dvec2(0.1, 0.05)],
-            bg_color: AlphaColor::BLACK.with_alpha(0.5),
+            bg_color: AlphaColor::BLACK.with_alpha(0.9),
             fg_color: AlphaColor::WHITE,
         }
     }

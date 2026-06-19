@@ -8,3 +8,4 @@ ranim = { workspace = true }
 derive_more = { workspace = true }
 itertools = { workspace = true }
 ordered-float = { workspace = true }
+typed_floats = { workspace = true }

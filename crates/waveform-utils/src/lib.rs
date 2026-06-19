@@ -1,4 +1,10 @@
-#![feature(more_float_constants, unboxed_closures, fn_traits, decl_macro)]
+#![feature(
+    more_float_constants,
+    unboxed_closures,
+    fn_traits,
+    decl_macro,
+    mapped_lock_guards
+)]
 pub mod envelope;
 pub mod freq;
 pub mod music;

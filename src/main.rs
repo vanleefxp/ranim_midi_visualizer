@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ use uncased::{AsUncased, UncasedStr};
 
 // use preview::{MidiVisualizerApp, run_app};
 use ranim_midi_visualizer_lib::{
-    ColorBy, MidiVisualizerConfig, midi_visualizer_scene, render_midi_visualizer,
+    ColorBy, MidiVisualizerConfig, ProgressBarConfig, midi_visualizer_scene, render_midi_visualizer,
 };
 use structured_midi::MidiMusic;
 
@@ -71,6 +71,8 @@ fn main() -> Result<()> {
         .arg(arg!(-s --size <SIZE> "Output video size.").value_names(["WIDTH", "HEIGHT"]).default_values(["1080p"]).num_args(1..=2))
         .arg(arg!(clear_color: --bg <COLOR> "Background color. In any supported CSS color format.").default_value("#282c34"))
         .arg(arg!(note_colors: --fg <COLOR>).default_values(["#89b9eb", "#9be347", "#f7931e", "#f7c71e"]).num_args(1..))
+        .arg(arg!(--progress_bar_fg <COLOR> "Foreground color of the progress bar on top of the video. In any supported CSS color format.").default_value("#a8a3cc"))
+        .arg(arg!(--progress_bar_bg <COLOR> "Background color of the progress bar on top of the video. In any supported CSS color format.").default_value("transparent"))
         .arg(arg!(--color_by <VALUE> "How note colors are assigned to different notes. Supported values are: channel, track, key_color.").default_value("channel"))
         .arg(arg!(--scroll_speed <FLOAT> "Note scroll speed in coordinate units per second. By default the screen height is 8 coordinate units.").default_value("2"))
         .arg(arg!(--buf_time <VALUE> "Additional time before and after playing the song.").value_names(["BEFORE", "AFTER"]).default_values(["2", "2"]).num_args(1..=2))
@@ -124,13 +126,31 @@ fn get_visualizer_config(matches: &ArgMatches) -> Result<MidiVisualizerConfig> {
         }
     };
     let buf_time = get_buf_time(matches)?;
+
+    let progress_bar_fg = matches
+        .get_one::<String>("progress_bar_fg")
+        .unwrap()
+        .clone();
+    let progress_bar_fg = try_color(&progress_bar_fg)?;
+    let progress_bar_bg = matches
+        .get_one::<String>("progress_bar_bg")
+        .unwrap()
+        .clone();
+    let progress_bar_bg = try_color(&progress_bar_bg)?;
+
     let visualizer_config = MidiVisualizerConfig {
         scroll_speed: matches.get_one::<String>("scroll_speed").unwrap().parse()?,
         buf_time,
         colors,
         color_by,
+        progress_bar_config: ProgressBarConfig {
+            fg_color: progress_bar_fg,
+            bg_color: progress_bar_bg,
+            ..Default::default()
+        },
         ..Default::default()
     };
+
     Ok(visualizer_config)
 }
 
