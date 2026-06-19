@@ -8,3 +8,4 @@ version.workspace = true
 
 [dependencies]
 smallvec = { workspace = true }
+itertools = { workspace = true }

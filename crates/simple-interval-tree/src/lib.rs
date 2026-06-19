@@ -1,19 +1,81 @@
 #![feature(allocator_api)]
 
+use itertools::Itertools;
 use smallvec::SmallVec;
 use std::{
     alloc::{Allocator, Global},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
-    ops::{Deref, Range},
-    ptr::NonNull,
+    mem::{self, MaybeUninit},
+    ops::{Deref, Range, RangeBounds},
+    ptr::{self, NonNull},
 };
 
-#[derive(Clone)]
 pub struct IntervalTree<R, V, A: Allocator = Global> {
     starts: BTreeMap<R, SmallVec<[NonNull<(Range<R>, V)>; 1]>>,
     ends: BTreeMap<R, SmallVec<[NonNull<(Range<R>, V)>; 1]>>,
     alloc: A,
+}
+
+unsafe impl<R: Send, V: Send, A: Allocator + Send> Send for IntervalTree<R, V, A> {}
+unsafe impl<R: Sync, V: Sync, A: Allocator + Sync> Sync for IntervalTree<R, V, A> {}
+
+impl<R: Clone + Ord, V: Clone, A: Allocator + Clone> Clone for IntervalTree<R, V, A> {
+    fn clone(&self) -> Self {
+        let mut ptrs = HashMap::with_capacity(self.len());
+
+        let alloc = self.alloc.clone();
+        let starts = self
+            .starts
+            .iter()
+            .map(|(range, nodes)| {
+                let nodes = nodes
+                    .iter()
+                    .map(|&ptr| {
+                        let pair = unsafe { &*(ptr.as_ptr()) }.clone();
+                        let new_ptr =
+                            Box::into_non_null_with_allocator(Box::new_in(pair, &alloc)).0;
+                        ptrs.insert(ptr, new_ptr);
+                        new_ptr
+                    })
+                    .collect();
+                (range.clone(), nodes)
+            })
+            .collect();
+        let ends = self
+            .ends
+            .iter()
+            .map(|(range, nodes)| {
+                let nodes = nodes
+                    .iter()
+                    .map(|ptr| ptrs.get(ptr).copied().unwrap())
+                    .collect();
+                (range.clone(), nodes)
+            })
+            .collect();
+
+        Self {
+            starts,
+            ends,
+            alloc,
+        }
+    }
+}
+
+impl<R, V, A: Allocator> Drop for IntervalTree<R, V, A> {
+    fn drop(&mut self) {
+        let mut starts = MaybeUninit::uninit();
+        unsafe { ptr::swap(&mut self.starts, &mut *starts.as_mut_ptr()) };
+        let starts = unsafe { starts.assume_init() };
+        
+        starts
+            .values()
+            .flatten()
+            .for_each(|&v| unsafe {
+                let _ = Box::from_non_null_in(v, &self.alloc);
+            });
+        self.ends.clear();
+    }
 }
 
 pub struct Entry<R, V, A: Allocator = Global> {
@@ -136,9 +198,8 @@ where
     }
 
     /// Removes a node from the tree.
-    /// #Safety
+    /// # Safety
     /// The node must be a valid pointer to a node in the tree.
-    #[allow(unused)]
     unsafe fn remove_node(&mut self, node: NonNull<(Range<R>, V)>) {
         // SAFETY: we are removing a valid node from the tree.
         let entry: Box<(Range<R>, V), _> = unsafe { Box::from_non_null_in(node, &self.alloc) };
@@ -158,16 +219,6 @@ where
         }
         if remove_end {
             ends.remove(&range.end);
-        }
-    }
-
-    pub fn remove(&mut self, entry: &Entry<R, V, A>) {
-        if self as *const Self != entry.tree {
-            panic!("Entry is not from this tree!")
-        }
-        // SAFETY: we are removing a valid node from the tree.
-        unsafe {
-            self.remove_node(entry.node);
         }
     }
 
@@ -214,8 +265,80 @@ where
             })
     }
 
+    fn endpoints_with_nodes_during<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = (bool, &R, NonNull<(Range<R>, V)>)>
+    where
+        G: RangeBounds<R> + Clone,
+    {
+        let starts_range = self
+            .starts
+            .range(range.clone())
+            .flat_map(|(r, v)| v.iter().map(move |&v| (false, r, v)));
+        let ends_range = self
+            .ends
+            .range(range.clone())
+            .flat_map(|(r, v)| v.iter().map(move |&v| (true, r, v)));
+        starts_range.merge_by(ends_range, |(_, r1, _), (_, r2, _)| r1 < r2)
+    }
+
+    pub fn remove(&mut self, entry: &Entry<R, V, A>) {
+        if !(self as *const Self).eq(&entry.tree) {
+            panic!("Entry is not from this tree!")
+        }
+        // SAFETY: we are removing a valid node from the tree.
+        unsafe {
+            self.remove_node(entry.node);
+        }
+    }
+
+    pub fn endpoints_with_values_during<G>(&self, range: &G) -> impl Iterator<Item = (bool, &R, &V)>
+    where
+        G: RangeBounds<R> + Clone,
+    {
+        self.endpoints_with_nodes_during(range)
+            .map(|(is_end, r, node)| {
+                // SAFETY: all pointers should point to valid nodes.
+                let value: &V = unsafe { &(*(node.as_ptr())).1 };
+                (is_end, r, value)
+            })
+    }
+
+    pub fn endpoints_with_values(&self) -> impl Iterator<Item = (bool, &R, &V)> {
+        self.endpoints_with_values_during(&..)
+    }
+
+    pub fn endpoints_with_entries_during<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = (bool, &R, Entry<R, V, A>)>
+    where
+        G: RangeBounds<R> + Clone,
+    {
+        self.endpoints_with_nodes_during(range)
+            .map(|(is_end, r, node)| {
+                let entry = Entry {
+                    tree: self as *const Self,
+                    node,
+                };
+                (is_end, r, entry)
+            })
+    }
+
+    pub fn endpoints_with_entries(&self) -> impl Iterator<Item = (bool, &R, Entry<R, V, A>)> {
+        self.endpoints_with_entries_during(&..)
+    }
+
     pub fn entries_by_start(&self) -> impl Iterator<Item = Entry<R, V, A>> {
         self.nodes_by_start().map(|node| Entry {
+            tree: self as *const Self,
+            node,
+        })
+    }
+
+    pub fn entries_by_end(&self) -> impl Iterator<Item = Entry<R, V, A>> {
+        self.nodes_by_end().map(|node| Entry {
             tree: self as *const Self,
             node,
         })
@@ -227,11 +350,17 @@ where
         unsafe { nodes_to_tuples(self.nodes_by_start()) }
     }
 
-    pub fn into_iter_by_start(self) -> impl Iterator<Item = (Range<R>, V)>
+    pub fn into_iter_by_start(mut self) -> impl Iterator<Item = (Range<R>, V)>
     where
-        A: 'static,
+        A: 'static + Clone,
     {
-        let Self { alloc, starts, .. } = self;
+        let alloc = self.alloc.clone();
+        let mut starts = MaybeUninit::uninit();
+        unsafe { ptr::swap(&mut self.starts, &mut *starts.as_mut_ptr()); }
+        let starts = unsafe { starts.assume_init() };
+        
+        mem::forget(self);
+
         starts
             .into_values()
             .flat_map(|v| v.into_iter())
@@ -248,11 +377,16 @@ where
         unsafe { nodes_to_tuples(self.nodes_by_end()) }
     }
 
-    pub fn into_iter_by_end(self) -> impl Iterator<Item = (Range<R>, V)>
+    pub fn into_iter_by_end(mut self) -> impl Iterator<Item = (Range<R>, V)>
     where
-        A: 'static,
+        A: 'static + Clone,
     {
-        let Self { alloc, ends, .. } = self;
+        let alloc = self.alloc.clone();
+        let mut ends = MaybeUninit::uninit();
+        unsafe { ptr::swap(&mut self.ends, &mut *ends.as_mut_ptr()); }
+        let ends = unsafe { ends.assume_init() };
+        mem::forget(self);
+
         ends.into_values()
             .flat_map(|v| v.into_iter())
             .map(move |node| {
