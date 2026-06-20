@@ -3,17 +3,13 @@
 use itertools::Itertools;
 use smallvec::SmallVec;
 use std::{
-    alloc::{Allocator, Global},
-    collections::{BTreeMap, HashMap},
-    fmt::Debug,
-    mem::{self, MaybeUninit},
-    ops::{Deref, Range, RangeBounds},
-    ptr::{self, NonNull},
+    alloc::{Allocator, Global}, cell::UnsafeCell, collections::{BTreeMap, HashMap, HashSet}, fmt::Debug, mem, ops::{Deref, Range, RangeBounds}, ptr::NonNull
 };
 
 pub struct IntervalTree<R, V, A: Allocator = Global> {
     starts: BTreeMap<R, SmallVec<[NonNull<(Range<R>, V)>; 1]>>,
     ends: BTreeMap<R, SmallVec<[NonNull<(Range<R>, V)>; 1]>>,
+    len: UnsafeCell<usize>,
     alloc: A,
 }
 
@@ -57,6 +53,7 @@ impl<R: Clone + Ord, V: Clone, A: Allocator + Clone> Clone for IntervalTree<R, V
         Self {
             starts,
             ends,
+            len: UnsafeCell::new(unsafe { *(self.len.get()) }),
             alloc,
         }
     }
@@ -64,17 +61,7 @@ impl<R: Clone + Ord, V: Clone, A: Allocator + Clone> Clone for IntervalTree<R, V
 
 impl<R, V, A: Allocator> Drop for IntervalTree<R, V, A> {
     fn drop(&mut self) {
-        let mut starts = MaybeUninit::uninit();
-        unsafe { ptr::swap(&mut self.starts, &mut *starts.as_mut_ptr()) };
-        let starts = unsafe { starts.assume_init() };
-        
-        starts
-            .values()
-            .flatten()
-            .for_each(|&v| unsafe {
-                let _ = Box::from_non_null_in(v, &self.alloc);
-            });
-        self.ends.clear();
+        self.clear();
     }
 }
 
@@ -100,6 +87,7 @@ where
         IntervalTree {
             starts: BTreeMap::new(),
             ends: BTreeMap::new(),
+            len: UnsafeCell::default(),
             alloc,
         }
     }
@@ -159,7 +147,17 @@ where
     }
 
     pub fn len(&self) -> usize {
-        self.starts.len()
+        // SAFETY: readonly access.
+        unsafe { *(self.len.get()) }
+    }
+
+    pub fn clear(&mut self) {
+        let starts = mem::take(&mut self.starts);
+        starts.values().flatten().for_each(|&v| unsafe {
+            let _ = Box::from_non_null_in(v, &self.alloc);
+        });
+        self.ends.clear();
+        *self.len.get_mut() = 0;
     }
 }
 
@@ -182,44 +180,60 @@ where
             .entry(end)
             .or_insert_with(SmallVec::new)
             .push(node);
+        *self.len.get_mut() += 1;
     }
 
     pub fn retain(&mut self, mut f: impl FnMut(&Range<R>, &mut V) -> bool) {
-        for tree in [&mut self.starts, &mut self.ends] {
-            tree.retain(|_, v| {
-                v.retain(|v| {
-                    // SAFETY: all pointers should point to valid nodes.
-                    let (range, value) = unsafe { v.as_mut() };
-                    f(range, value)
-                });
-                !v.is_empty()
+        let mut removed = HashSet::new();
+        self.starts.retain(|_, v| {
+            v.retain(|v| {
+                // SAFETY: all pointers should point to valid nodes.
+                let (range, value) = unsafe { v.as_mut() };
+                if f(range, value) {
+                    true
+                } else {
+                    removed.insert(*v);
+                    *self.len.get_mut() -= 1;
+                    let _ = unsafe { Box::from_non_null_in(*v, &self.alloc) };
+                    false
+                }
             });
-        }
+            !v.is_empty()
+        });
+        self.ends.retain(|_, v| {
+            v.retain(|v| !removed.contains(v));
+            !v.is_empty()
+        });
     }
 
     /// Removes a node from the tree.
     /// # Safety
     /// The node must be a valid pointer to a node in the tree.
-    unsafe fn remove_node(&mut self, node: NonNull<(Range<R>, V)>) {
+    unsafe fn remove_node(&mut self, node: NonNull<(Range<R>, V)>) -> (Range<R>, V) {
         // SAFETY: we are removing a valid node from the tree.
         let entry: Box<(Range<R>, V), _> = unsafe { Box::from_non_null_in(node, &self.alloc) };
         let (range, _) = entry.as_ref();
         let IntervalTree { starts, ends, .. } = self;
+        
         let (remove_start, remove_end) = if let Some(start_nodes) = starts.get_mut(&range.start)
             && let Some(end_nodes) = ends.get_mut(&range.end)
         {
             start_nodes.retain(|v| *v != node);
             end_nodes.retain(|v| *v != node);
+            *self.len.get_mut() -= 1;
             (start_nodes.is_empty(), end_nodes.is_empty())
         } else {
             unreachable!()
         };
+
         if remove_start {
             starts.remove(&range.start);
         }
         if remove_end {
             ends.remove(&range.end);
         }
+
+        *entry
     }
 
     fn nodes_by_start(&self) -> impl Iterator<Item = NonNull<(Range<R>, V)>> {
@@ -283,13 +297,13 @@ where
         starts_range.merge_by(ends_range, |(_, r1, _), (_, r2, _)| r1 < r2)
     }
 
-    pub fn remove(&mut self, entry: &Entry<R, V, A>) {
+    pub fn remove(&mut self, entry: &Entry<R, V, A>) -> (Range<R>, V) {
         if !(self as *const Self).eq(&entry.tree) {
-            panic!("Entry is not from this tree!")
+            panic!("Entry is not from this tree!");
         }
         // SAFETY: we are removing a valid node from the tree.
         unsafe {
-            self.remove_node(entry.node);
+            self.remove_node(entry.node)
         }
     }
 
@@ -355,10 +369,7 @@ where
         A: 'static + Clone,
     {
         let alloc = self.alloc.clone();
-        let mut starts = MaybeUninit::uninit();
-        unsafe { ptr::swap(&mut self.starts, &mut *starts.as_mut_ptr()); }
-        let starts = unsafe { starts.assume_init() };
-        
+        let starts = mem::take(&mut self.starts);
         mem::forget(self);
 
         starts
@@ -382,9 +393,7 @@ where
         A: 'static + Clone,
     {
         let alloc = self.alloc.clone();
-        let mut ends = MaybeUninit::uninit();
-        unsafe { ptr::swap(&mut self.ends, &mut *ends.as_mut_ptr()); }
-        let ends = unsafe { ends.assume_init() };
+        let ends = mem::take(&mut self.ends);
         mem::forget(self);
 
         ends.into_values()
@@ -434,27 +443,48 @@ mod tests {
     fn test_interval_tree() {
         let mut tree = IntervalTree::from_iter([
             (0..3, "a"),
-            (1..2, "b"),
-            (6..7, "c"),
-            (3..10, "d"),
-            (5..6, "e"),
+            (1..4, "b"),
+            (1..2, "c"),
+            (6..7, "d"),
+            (3..10, "e"),
+            (5..6, "f"),
+            (8..10, "g")
         ]);
         println!("{:?}", tree);
+        assert_eq!(tree.len(), 7);
 
         let subtree = tree
             .iter_during(&(1..6))
             .map(|(r, &v)| (r.clone(), v))
             .collect::<IntervalTree<_, _>>();
         println!("{:?}", subtree);
+        assert_eq!(subtree.len(), 3);
 
         let subtree = tree
             .iter_overlaps(&(1..6))
             .map(|(r, &v)| (r.clone(), v))
             .collect::<IntervalTree<_, _>>();
         println!("{:?}", subtree);
+        assert_eq!(subtree.len(), 5);
 
         let to_remove = tree.entries_by_start().nth(2).unwrap();
-        tree.remove(&to_remove);
+        let removed = tree.remove(&to_remove);
+        println!("Removed: {:?}", removed);
         println!("{:?}", tree);
+        assert_eq!(tree.len(), 6);
+
+        tree.retain(|k, v| {
+            if let Some(ch) = v.chars().next() {
+                ch <= 'd' && k.start >= 2
+            } else {
+                false
+            }
+        });
+        println!("{:?}", tree);
+        assert_eq!(tree.len(), 1);
+
+        tree.clear();
+        println!("{:?}", tree);
+        assert_eq!(tree.len(), 0);
     }
 }
