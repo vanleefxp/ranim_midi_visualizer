@@ -25,7 +25,7 @@ const PEDAL_SVG_SRC: &str = include_str!("assets/pedals.svg");
 pub struct PianoPedals {
     origin: DVec3,
     height: f64,
-    status: [u8; 3],
+    status: [f64; 3],
     items: RefCell<Option<[VItem; 3]>>,
 }
 
@@ -70,13 +70,13 @@ impl PianoPedals {
         }
     }
 
-    pub fn set_pedal_status(&mut self, pedal: Pedal, status: u8) -> &mut Self {
+    pub fn set_pedal_status(&mut self, pedal: Pedal, status: f64) -> &mut Self {
         self.status[pedal as usize] = status;
         self.set_item_opacity();
         self
     }
 
-    pub fn pedal_status(&self) -> [u8; 3] {
+    pub fn pedal_status(&self) -> [f64; 3] {
         self.status
     }
 
@@ -101,7 +101,7 @@ impl Default for PianoPedals {
         Self {
             origin: DVec3::ZERO,
             height: 0.75,
-            status: [0; 3],
+            status: [0.; 3],
             items: Default::default(),
         }
     }

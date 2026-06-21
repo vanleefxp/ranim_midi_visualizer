@@ -8,13 +8,14 @@ use phf::phf_map;
 use ranim::{
     Output, OutputFormat, RanimScene, SceneConfig, cmd::preview::Resolution, color::try_color,
 };
+use typed_floats::tf64;
 use uncased::{AsUncased, UncasedStr};
 
 // use preview::{MidiVisualizerApp, run_app};
 use ranim_midi_visualizer_lib::{
     ColorBy, MidiVisualizerConfig, ProgressBarConfig, midi_visualizer_scene, render_midi_visualizer,
 };
-use structured_midi::MidiMusic;
+use waveform_utils::music::{RawMusic, parse_midi_raw};
 
 static VIDEO_SIZES: phf::Map<&UncasedStr, Resolution> = phf_map! {
     UncasedStr::new("8k") | UncasedStr::new("4320p") => Resolution::new(7680, 4320),
@@ -154,7 +155,7 @@ fn get_visualizer_config(matches: &ArgMatches) -> Result<MidiVisualizerConfig> {
     Ok(visualizer_config)
 }
 
-fn get_song_and_name(matches: &ArgMatches) -> Result<(MidiMusic, String)> {
+fn get_song_and_name(matches: &ArgMatches) -> Result<(RawMusic, String)> {
     let midi_path = PathBuf::from(
         matches
             .get_one::<String>("midi_file")
@@ -162,7 +163,7 @@ fn get_song_and_name(matches: &ArgMatches) -> Result<(MidiMusic, String)> {
             .ok_or_else(|| anyhow!("invalid input"))?,
     );
     let src = std::fs::read(&midi_path)?;
-    let music = MidiMusic::try_from(&src[..])?;
+    let music = parse_midi_raw(&src)?;
     let name = midi_path
         .file_stem()
         .map(|v| v.to_string_lossy().to_string())
@@ -200,19 +201,16 @@ fn get_video_format(matches: &ArgMatches) -> Result<OutputFormat> {
         .ok_or_else(|| anyhow!("invalid format: {format}"))
 }
 
-fn get_buf_time(matches: &ArgMatches) -> Result<[f64; 2]> {
-    let mut buf_time = [0., 0.];
+fn get_buf_time(matches: &ArgMatches) -> Result<[tf64::PositiveFinite; 2]> {
+    let mut buf_time = <[tf64::PositiveFinite; 2]>::default();
     let mut args = matches.get_many::<String>("buf_time").unwrap();
     if args.len() == 1 {
-        let v = args.next().unwrap().parse::<f64>()?;
-        buf_time[0] = v;
-        buf_time[1] = v;
+        let v = tf64::PositiveFinite::try_from(args.next().unwrap().parse::<f64>()?)?;
+        buf_time.fill(v);
     } else {
-        buf_time[0] = args.next().unwrap().parse::<f64>()?;
-        buf_time[1] = args.next().unwrap().parse::<f64>()?;
-    }
-    if buf_time.iter().any(|&v| !(v.is_finite() && v >= 0.)) {
-        bail!("`buf_time` must be non-negative finite numbers");
+        for v in buf_time.iter_mut() {
+            *v = tf64::PositiveFinite::try_from(args.next().unwrap().parse::<f64>()?)?;
+        }
     }
     Ok(buf_time)
 }

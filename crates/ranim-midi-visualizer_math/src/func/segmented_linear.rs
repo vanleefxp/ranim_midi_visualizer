@@ -22,19 +22,17 @@ pub trait InvertInterpolatable {
     fn t_value(&self, start: &Self, end: &Self) -> f64;
 }
 
-macro_rules! impl_invert_interpolatable {
-    ($($t:ty),*$(,)?) => {
-        $(
-            impl InvertInterpolatable for $t {
-                fn t_value(&self, start: &Self, end: &Self) -> f64 {
-                    (*self as f64 - *start as f64) / (*end as f64 - *start as f64)
-                }
+macro invert_interpolatable_impl($($t:ty),*$(,)?) {
+    $(
+        impl InvertInterpolatable for $t {
+            fn t_value(&self, start: &Self, end: &Self) -> f64 {
+                (*self as f64 - *start as f64) / (*end as f64 - *start as f64)
             }
-        )*
-    };
+        }
+    )*
 }
 
-impl_invert_interpolatable!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64, isize, usize);
+invert_interpolatable_impl!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64, isize, usize);
 
 impl InvertInterpolatable for f32o {
     fn t_value(&self, start: &Self, end: &Self) -> f64 {
@@ -275,6 +273,22 @@ mod tests {
         assert!(f(&f64o::from(2.5)) - 1.5 < 1e-10);
         assert!(f(&f64o::from(3.5)) - 1. < 1e-10);
         assert!(f(&f64o::from(5.)) - 0. < 1e-10);
+    }
+
+    #[test]
+    fn test_segmented_linear_fn_int() {
+        let f = SegmentedLinearFn::from_iter([
+            (0u64, 0u64),
+            (100, 100),
+            (200, 100),
+            (300, 200),
+            (400, 0),
+        ]);
+        assert_eq!(f(&50), 50);
+        assert_eq!(f(&150), 100);
+        assert_eq!(f(&250), 150);
+        assert_eq!(f(&350), 100);
+        assert_eq!(f(&500), 0);
     }
 
     #[test]
