@@ -22,7 +22,6 @@ tracing-subscriber = { workspace = true }
 uncased = "0.9.10"
 color = "0.3.2"
 phf = { workspace = true }
-# structured-midi = { workspace = true }
 eframe = { workspace = true }
 ranim-midi-visualizer_lib = { workspace = true }
 waveform-utils = { workspace = true }
@@ -37,7 +36,6 @@ features = ["cargo", "color"]
 members = [
     "crates/ranim_music",
     "crates/ranim-midi-visualizer_lib",
-    "crates/structured-midi",
     "crates/ranim-midi-visualizer_ui",
     "crates/music-utils",
     "crates/ranim-midi-visualizer_math",
@@ -61,7 +59,6 @@ num-complex = "0.4.6"
 
 ranim_music = { path = "crates/ranim_music" }
 ranim-midi-visualizer_math = { path = "crates/ranim-midi-visualizer_math" }
-structured-midi = { path = "crates/structured-midi" }
 music-utils = { path = "crates/music-utils" }
 waveform-utils = { path = "crates/waveform-utils" }
 simple-interval-tree = { path = "crates/simple-interval-tree" }
