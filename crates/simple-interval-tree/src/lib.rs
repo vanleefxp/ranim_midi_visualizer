@@ -519,75 +519,143 @@ where
 
 #[cfg(test)]
 mod tests {
+    use tracing::debug;
+    use tracing_test::traced_test;
     use super::*;
 
+    const EXAMPLE_TREE_DATA: &'static [(Range<u32>, &'static str)] = [
+        (0..3, "a"),
+        (1..4, "b"),
+        (1..2, "c"),
+        (6..7, "d"),
+        (3..10, "e"),
+        (5..6, "f"),
+        (8..10, "g"),
+        (0..12, "h"),
+    ].as_slice();
+
+    fn build_example_tree() -> IntervalTree<u32, &'static str> {
+        IntervalTree::from_iter(EXAMPLE_TREE_DATA.iter().cloned())
+    }
+
+    #[traced_test]
     #[test]
-    fn test_interval_tree() {
-        let mut tree = IntervalTree::from_iter([
-            (0..3, "a"),
-            (1..4, "b"),
-            (1..2, "c"),
-            (6..7, "d"),
-            (3..10, "e"),
-            (5..6, "f"),
-            (8..10, "g"),
-            (0..12, "h"),
-        ]);
-        println!("{:?}", tree);
-        // assert_eq!(tree.len(), 7);
+    fn test_build_tree() {
+        let tree = build_example_tree();
+        debug!("{:?}", tree);
+        assert_eq!(tree.len(), EXAMPLE_TREE_DATA.len());
+    }
 
-        // During
-        {
-            let subtree = tree
-                .iter_during(&(1..6))
-                .cloned()
-                .collect::<IntervalTree<_, _>>();
-            println!("{:?}", subtree);
-            // assert_eq!(subtree.len(), 3);
+    #[traced_test]
+    #[test]
+    fn test_iter_by_start() {
+        let tree = build_example_tree();
+
+        let mut count = 0usize;
+        for (range, value) in tree.iter_by_start() {
+            debug!("{:?}: {:?}", range, value);
+            count += 1;
         }
+        debug!("{:?} elements in the tree", count);
+        assert_eq!(count, tree.len());
 
-        // Overlaps
-        {
-            let subtree = tree
-                .iter_overlaps(&(1..6))
-                .cloned()
-                .collect::<IntervalTree<_, _>>();
-            println!("{:?}", subtree);
-            // assert_eq!(subtree.len(), 5);
+        for ((prev, _), (cur, _)) in tree.iter_by_start().tuple_windows() {
+            assert!(prev.start <= cur.start);
         }
+    }
 
-        // Starts during
-        {
-            let subtree = tree
-                .iter_starts_during(&(4..=7))
-                .cloned()
-                .collect::<IntervalTree<_, _>>();
-            println!("{:?}", subtree);
-            // assert_eq!(subtree.len(), 3);
+    #[traced_test]
+    #[test]
+    fn test_iter_by_end() {
+        let tree = build_example_tree();
+
+        let mut count = 0usize;
+        for (range, value) in tree.iter_by_end() {
+            debug!("{:?}: {:?}", range, value);
+            count += 1;
         }
+        debug!("{:?} elements in the tree", count);
+        assert_eq!(count, tree.len());
 
-        // Ends during
-        {
-            let subtree = tree
-                .iter_starts_during(&(1..=4))
-                .cloned()
-                .collect::<IntervalTree<_, _>>();
-            println!("{:?}", subtree);
-            // assert_eq!(subtree.len(), 3);
+        for ((prev, _), (cur, _)) in tree.iter_by_end().tuple_windows() {
+            assert!(prev.end <= cur.end);
         }
+    }
 
-        tree.retain(|k, v| {
-            if let Some(ch) = v.chars().next() {
-                ch <= 'd' && k.start >= 2
+    #[traced_test]
+    #[test]
+    fn test_iter_during() {
+        let tree = build_example_tree();
+        let query_range = 1..6;
+        for (range, value) in tree.iter_during(&query_range) {
+            debug!("{:?}: {:?}", range, value);
+            assert!(range.start >= query_range.start);
+            assert!(range.end <= query_range.end);
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_iter_overlaps() {
+        let tree = build_example_tree();
+        let query_range = 1..6;
+        for (range, value) in tree.iter_overlaps(&query_range) {
+            debug!("{:?}: {:?}", range, value);
+            assert!(range.start <= query_range.end);
+            assert!(range.end >= query_range.start);
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_iter_starts_during() {
+        let tree = build_example_tree();
+        let query_range = 4..7;
+        for (range, value) in tree.iter_starts_during(&query_range) {
+            debug!("{:?}: {:?}", range, value);
+            assert!(query_range.contains(&range.start));
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_iter_ends_during() {
+        let tree = build_example_tree();
+        let query_range = 1..=4;
+        for (range, value) in tree.iter_ends_during(&query_range) {
+            debug!("{:?}: {:?}", range, value);
+            assert!(query_range.contains(&range.end));
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_retain() {
+        let mut tree = build_example_tree();
+        tree.retain(|range, value| {
+            if let Some(ch) = value.chars().next() {
+                ch <= 'd' && range.start >= 2
             } else {
                 false
             }
         });
-        println!("{:?}", tree);
-        // assert_eq!(tree.len(), 1);
+        for (range, value) in tree.iter_by_start() {
+            debug!("{:?}: {:?}", range, value);
+            assert!(range.start >= 2);
+            if let Some(ch) = value.chars().next() {
+                assert!(ch <= 'd');
+            } else {
+                unreachable!()
+            }
+        }
+    }
 
+    #[traced_test]
+    #[test]
+    fn test_clear() {
+        let mut tree = build_example_tree();
         tree.clear();
-        println!("{:?}", tree);
+        debug!("{:?}", tree);
         assert_eq!(tree.len(), 0);
     }
 }
