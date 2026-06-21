@@ -9,3 +9,7 @@ version.workspace = true
 [dependencies]
 smallvec = { workspace = true }
 itertools = { workspace = true }
+
+[dev-dependencies]
+tracing = { workspace = true }
+tracing-test = { workspace = true }

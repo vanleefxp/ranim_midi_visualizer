@@ -34,7 +34,8 @@ use std::{
 use tracing::{error, info};
 use typed_floats::tf64;
 use waveform_utils::{
-    music::{Note, NoteContainer as _, RawMusic}, synth::{MusicDirective, NoteDirective, Synth},
+    music::{Note, NoteContainer as _, RawMusic},
+    synth::{MusicDirective, NoteDirective, Synth},
 };
 
 #[allow(unused)]
@@ -480,7 +481,13 @@ impl MidiVisualizerAppInner {
                                     if instant.is_end {
                                         synth.directive(NoteDirective::new_off(pitch).into());
                                     } else {
-                                        synth.directive(NoteDirective { pitch, volume: velocity }.into());
+                                        synth.directive(
+                                            NoteDirective {
+                                                pitch,
+                                                volume: velocity,
+                                            }
+                                            .into(),
+                                        );
                                     }
                                 }
                                 self.inner.time = new_time;

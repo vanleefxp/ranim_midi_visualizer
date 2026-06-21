@@ -32,7 +32,8 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, midly::Error> {
         }
     };
 
-    // TODO: handle sequential multiple tracks
+    // [TODO] handle sequential multiple tracks
+    // [FIXME] multi-track MIDI's tempo information is incorrect
     let beat_resolution = get_beat_resolution(header.timing);
     let mut music = RawMusic::new(time_resolution);
 
