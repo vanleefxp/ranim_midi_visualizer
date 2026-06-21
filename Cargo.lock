@@ -4777,7 +4777,7 @@ dependencies = [
 
 [[package]]
 name = "ranim-midi-visualizer"
-version = "0.1.2"
+version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -4798,7 +4798,7 @@ dependencies = [
 
 [[package]]
 name = "ranim-midi-visualizer_lib"
-version = "0.1.2"
+version = "0.1.0-alpha"
 dependencies = [
  "color",
  "derivative",
@@ -4830,7 +4830,7 @@ dependencies = [
 
 [[package]]
 name = "ranim-midi-visualizer_ui"
-version = "0.1.2"
+version = "0.1.0-alpha"
 dependencies = [
  "async-channel",
  "cpal",
@@ -5578,7 +5578,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "simple-interval-tree"
-version = "0.1.2"
+version = "0.1.0-alpha"
 dependencies = [
  "itertools",
  "smallvec",
@@ -6360,6 +6360,27 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tracing-test"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19a4c448db514d4f24c5ddb9f73f2ee71bfb24c526cf0c570ba142d1119e0051"
+dependencies = [
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad06847b7afb65c7866a36664b75c40b895e318cea4f71299f013fb22965329d"
+dependencies = [
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -7208,7 +7229,7 @@ dependencies = [
 
 [[package]]
 name = "waveform-utils"
-version = "0.1.2"
+version = "0.1.0-alpha"
 dependencies = [
  "cpal",
  "derivative",
@@ -7219,6 +7240,8 @@ dependencies = [
  "ranim-midi-visualizer_math",
  "simple-interval-tree",
  "smallvec",
+ "tracing",
+ "tracing-test",
  "typed_floats",
 ]
 

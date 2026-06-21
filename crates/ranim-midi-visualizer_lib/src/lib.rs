@@ -1,5 +1,3 @@
-pub mod stroke_and_fill;
-
 use std::{num::NonZero, ops::Range};
 
 use derivative::Derivative;
