@@ -25,7 +25,7 @@ use ranim_midi_visualizer_lib::{ColorBy, midi_visualizer_scene};
 use ranim_midi_visualizer_math::func::LadderFn;
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     num::NonZeroU64,
     path::PathBuf,
     sync::{Arc, LazyLock, Mutex},
@@ -34,8 +34,7 @@ use std::{
 use tracing::{error, info};
 use typed_floats::tf64;
 use waveform_utils::{
-    music::{NoteContainer as _, RawMusic},
-    synth::{NoteDirective, Synth},
+    music::{Note, NoteContainer as _, RawMusic}, synth::{MusicDirective, NoteDirective, Synth},
 };
 
 #[allow(unused)]
@@ -296,33 +295,6 @@ impl eframe::App for MidiVisualizerApp {
         //         egui::TextEdit::multiline(&mut text).ui(ui);
         //     });
 
-        if self.is_playing() {
-            let time_range = self.inner.time..self.inner.time;
-            let notes_on = &mut self.inner.inner.notes_on;
-            let new_notes_on = self
-                .inner
-                .inner
-                .music
-                .notes_overlaps(&time_range)
-                .map(|(_, note)| (note.pitch, note.velocity))
-                .collect::<HashMap<_, _>>();
-            let started_notes = new_notes_on
-                .iter()
-                .filter(|(k, _)| !notes_on.contains_key(k));
-            let stopped_notes = notes_on
-                .keys()
-                .filter(|k| new_notes_on.contains_key(k))
-                .collect::<HashSet<_>>();
-            let mut synth = self.inner.inner.synth.lock().unwrap();
-            for (&pitch, &volume) in started_notes {
-                synth.directive(NoteDirective { pitch, volume }.into());
-            }
-            for &pitch in stopped_notes {
-                synth.directive(NoteDirective::new_off(pitch).into());
-            }
-            *notes_on = new_notes_on;
-        }
-
         // exporting
         {
             // Poll export progress
@@ -487,20 +459,31 @@ impl MidiVisualizerAppInner {
                             self.pause();
                         } else {
                             // currently playing
+                            let mut synth = self.inner.synth.lock().unwrap();
                             let new_time = ((Instant::now() - start_t).as_nanos() as f64
                                 * self.playback_speed)
                                 as u64;
                             if new_time > self.music.duration {
                                 if self.looping {
                                     // restarts from beginning
-                                    self.time = new_time % self.music.duration;
+                                    self.inner.time = new_time % self.music.duration;
                                 } else {
                                     // pauses at final state
-                                    self.time = self.music.duration;
-                                    self.play_start_t = None;
+                                    self.inner.time = self.music.duration;
+                                    self.inner.play_start_t = None;
                                 }
+                                synth.directive(MusicDirective::Stop);
                             } else {
-                                self.time = new_time;
+                                let time_range = self.inner.time..new_time;
+                                for instant in self.music.note_instants_during(&time_range) {
+                                    let Note { pitch, velocity } = instant.pair.1;
+                                    if instant.is_end {
+                                        synth.directive(NoteDirective::new_off(pitch).into());
+                                    } else {
+                                        synth.directive(NoteDirective { pitch, volume: velocity }.into());
+                                    }
+                                }
+                                self.inner.time = new_time;
                             }
                             ui.request_repaint();
                         }
