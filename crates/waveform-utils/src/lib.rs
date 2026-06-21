@@ -3,7 +3,8 @@
     unboxed_closures,
     fn_traits,
     decl_macro,
-    mapped_lock_guards
+    mapped_lock_guards,
+    range_into_bounds
 )]
 pub mod envelope;
 pub mod freq;

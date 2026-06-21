@@ -11,12 +11,12 @@ midly = { workspace = true }
 derivative = { workspace = true }
 cpal = { workspace = true }
 num-complex = { workspace = true, optional = true }
-ordered-float = { workspace = true }
 typed_floats = { workspace = true }
 derive_more = { workspace = true }
 smallvec = { workspace = true }
 simple-interval-tree = { workspace = true }
 ranim-midi-visualizer_math = { workspace = true }
+itertools = { workspace = true }
 
 [features]
 harmonic-series = ["dep:num-complex"]

@@ -4,6 +4,7 @@ use std::any::Any;
 
 use crate::freq::ToFrequency;
 pub use simple::*;
+use typed_floats::tf64;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -17,7 +18,16 @@ pub enum MusicDirective<Pitch: ToFrequency = i8> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NoteDirective<Pitch: ToFrequency> {
     pub pitch: Pitch,
-    pub volume: f64,
+    pub volume: tf64::PositiveFinite,
+}
+
+impl<Pitch: ToFrequency> NoteDirective<Pitch> {
+    pub fn new_off(pitch: Pitch) -> Self {
+        Self {
+            pitch,
+            volume: tf64::PositiveFinite::default(),
+        }
+    }
 }
 
 impl<Pitch: ToFrequency> From<NoteDirective<Pitch>> for MusicDirective<Pitch> {

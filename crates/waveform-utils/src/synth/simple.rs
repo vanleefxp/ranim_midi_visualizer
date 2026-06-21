@@ -202,7 +202,7 @@ where
         match directive {
             Note(NoteDirective { pitch, volume }) => {
                 if volume > 0. {
-                    self.attack(pitch, volume);
+                    self.attack(pitch, volume.into());
                 } else {
                     self.release(&pitch);
                 }
