@@ -519,9 +519,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use tracing::debug;
     use tracing_test::traced_test;
-    use super::*;
 
     const EXAMPLE_TREE_DATA: &[(Range<u32>, &str)] = [
         (0..3, "a"),
@@ -533,7 +533,8 @@ mod tests {
         (8..10, "g"), // overlapping interval end
         (0..12, "h"),
         (1..2, "i"), // overlapping interval start and end
-    ].as_slice();
+    ]
+    .as_slice();
 
     fn build_example_tree() -> IntervalTree<u32, &'static str> {
         IntervalTree::from_iter(EXAMPLE_TREE_DATA.iter().cloned())

@@ -296,11 +296,13 @@ mod tests {
         let f = SegmentedLinearFn::from_iter(
             [(0., 0.), (1., 1.), (2., 1.), (3., 2.), (4., 0.)].map(|(x, y)| (f64o::from(x), y)),
         );
-        let g =
-            SegmentedLinearFn::from_iter([(-1., 0.), (0., 2.), (5., 1.)].map(|(x, y)| (f64o::from(x), y)));
+        let g = SegmentedLinearFn::from_iter(
+            [(-1., 0.), (0., 2.), (5., 1.)].map(|(x, y)| (f64o::from(x), y)),
+        );
         let mut h = f.clone();
         h += &g;
         let points = [-1.5, -0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5].map(f64o::from);
+        #[allow(clippy::useless_conversion)]
         for x in points.iter() {
             assert!(f64::from(h(x) - (f(x) + g(x))).abs() < 1e-10);
         }
