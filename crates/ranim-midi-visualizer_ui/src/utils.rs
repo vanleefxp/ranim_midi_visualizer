@@ -1,6 +1,9 @@
 #![allow(unused)]
 
-use std::ops::Range;
+use std::{
+    num::{NonZero, NonZeroU64},
+    ops::Range,
+};
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
 use eframe::egui::{self, ahash::HashMap};
@@ -21,6 +24,7 @@ use ranim_music::items::{
     PianoKeyboardColor as RanimPianoKeyboardColor, PianoKeyboardConfig as RanimPianoKeyboardConfig,
     PianoKeyboardSize,
 };
+use typed_floats::tf64;
 
 #[derive(Debug, Clone, Copy, Deref, DerefMut, AsRef, AsMut, From, Into)]
 pub struct RanimColor(pub AlphaColor<Srgb>);
@@ -128,7 +132,7 @@ pub struct MidiVisualizerConfig {
     pub keyboard_config: PianoKeyboardConfig,
     pub status_bar_config: StatusBarConfig,
     pub progress_bar_config: ProgressBarConfig,
-    pub time_window: u64,
+    pub time_window: NonZeroU64,
     #[serde(skip)] // [TODO] make this field savable
     pub text_font: RanimTextFont,
 }
@@ -305,13 +309,13 @@ impl From<RanimMidiVisualizerConfig> for MidiVisualizerConfig {
         } = value;
         MidiVisualizerConfig {
             colors: colors.into_iter().map(to_egui_color).collect(),
-            scroll_speed,
+            scroll_speed: scroll_speed.into(),
             color_by,
-            buf_time: buf_time.map(|v| (v * 1e9) as u64),
+            buf_time: buf_time.map(|v| (f64::from(v) * 1e9) as u64),
             keyboard_config: keyboard_config.into(),
             status_bar_config: status_bar_config.into(),
             progress_bar_config: progress_bar_config.into(),
-            time_window: (time_window * 1e9) as u64,
+            time_window: NonZeroU64::try_from((f64::from(time_window) * 1e9) as u64).unwrap(),
             text_font,
         }
     }
@@ -332,13 +336,13 @@ impl From<MidiVisualizerConfig> for RanimMidiVisualizerConfig {
         } = value;
         RanimMidiVisualizerConfig {
             colors: colors.into_iter().map(to_ranim_color).collect(),
-            scroll_speed,
+            scroll_speed: scroll_speed.try_into().unwrap(),
             color_by,
-            buf_time: buf_time.map(|v| v as f64 / 1e9),
+            buf_time: buf_time.map(|v| tf64::PositiveFinite::try_from(v as f64 / 1e9).unwrap()),
             keyboard_config: keyboard_config.into(),
             status_bar_config: status_bar_config.into(),
             progress_bar_config: progress_bar_config.into(),
-            time_window: time_window as f64 / 1e9,
+            time_window: tf64::StrictlyPositive::try_from(time_window.get() as f64 / 1e9).unwrap(),
             text_font,
         }
     }

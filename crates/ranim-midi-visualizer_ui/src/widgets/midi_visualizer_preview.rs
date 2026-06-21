@@ -6,7 +6,6 @@ use crate::utils::{
 };
 use eframe::{
     egui::{self, Response, Sense, Ui},
-    emath::OrderedFloat,
     epaint::{self, HsvaGamma},
 };
 use music_utils::{
@@ -17,9 +16,7 @@ use ranim::{cmd::preview::Resolution, glam::DVec2};
 use ranim_midi_visualizer_lib::ColorBy;
 use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 use std::{collections::HashMap, f32::consts::PI as PI_f32, ops::Range};
-use structured_midi::{MidiMusic, MultiTrackMidiNote};
-
-type f64o = OrderedFloat<f64>;
+use waveform_utils::music::{Note, NoteContainer as _, RawMusic};
 
 fn points_on_circ(
     center: egui::Pos2,
@@ -132,8 +129,8 @@ impl From<PianoKeyShape> for egui::Shape {
 
 #[derive(Default, Clone, Debug)]
 pub struct DataCache {
-    pub nps: Option<f64>,
-    pub nps_max: Option<f64>,
+    pub note_rate: Option<usize>,
+    pub note_rate_max: Option<usize>,
     pub legato_index: Option<f64>,
     pub note_count: Option<usize>,
     pub note_count_total: Option<usize>,
@@ -143,7 +140,7 @@ pub struct DataCache {
 #[allow(unused)]
 pub struct MidiVisualizerPreview<'a> {
     /// the displaying MIDI music
-    music: &'a MidiMusic,
+    music: &'a RawMusic,
     /// configuration of the MIDI visualizer
     pub visualizer_config: &'a MidiVisualizerConfig,
     /// configuration of the Ranim scene
@@ -158,7 +155,7 @@ pub struct MidiVisualizerPreview<'a> {
 
 impl<'a> MidiVisualizerPreview<'a> {
     pub fn new(
-        music: &'a MidiMusic,
+        music: &'a RawMusic,
         visualizer_config: &'a MidiVisualizerConfig,
         clear_color: egui::Color32,
         resolution: Resolution,
@@ -176,7 +173,7 @@ impl<'a> MidiVisualizerPreview<'a> {
 
 impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let total_time = self.music.duration();
+        let total_time = self.music.duration;
 
         let available_size = ui.available_size();
         let aspect_ratio = self.resolution.ratio();
@@ -273,6 +270,9 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                         fg_color,
                     );
                 };
+                let note_rate_to_nps = |note_rate: usize| {
+                    note_rate as f64 * self.music.resolution.get() as f64 / window.get() as f64
+                };
 
                 let note_count = self.cache.note_count.unwrap_or_else(|| {
                     self.music
@@ -289,19 +289,20 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                         .map(|v| v.1)
                         .unwrap_or(0)
                 });
-                let nps = self
+                let note_rate = self
                     .cache
-                    .nps
-                    .unwrap_or_else(|| self.music.nps(self.time, window));
-                let nps_max = self.cache.nps_max.unwrap_or_else(|| {
+                    .note_rate
+                    .unwrap_or_else(|| self.music.note_rate(self.time, window));
+                let note_rate_max = self.cache.note_rate_max.unwrap_or_else(|| {
                     self.music
-                        .nps_iter(window)
+                        .note_rate_iter(window)
                         .take_while(|&(time, _)| time <= self.time)
-                        .map(|(_, nps)| f64o::from(nps))
+                        .map(|(_, nps)| nps)
                         .max()
-                        .map(|v| v.into_inner())
-                        .unwrap_or(0.0)
+                        .unwrap_or_default()
                 });
+                let nps = note_rate_to_nps(note_rate);
+                let nps_max = note_rate_to_nps(note_rate_max);
                 let legato_index = self
                     .cache
                     .legato_index
@@ -357,28 +358,32 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let note_colors = self.visualizer_config.colors.as_slice();
 
                 let highlighted_keys: HashMap<_, _> = {
-                    let time_range = self.time..self.time;
-                    let notes_on = self
-                        .music
-                        .notes_between_iter(&time_range, key_range)
-                        .map(|(_, note)| note);
+                    let time_range = self.time..=self.time;
+                    let notes_on = self.music.notes_overlaps_with_pos(&time_range).filter_map(
+                        |((_, note), pos)| {
+                            if key_range.contains(&note.pitch) {
+                                Some((note.pitch, pos))
+                            } else {
+                                None
+                            }
+                        },
+                    );
                     {
                         use ColorBy::*;
                         match color_by {
                             Channel => notes_on
-                                .map(|note| {
-                                    (note.key, *note_colors.index_cyc(note.loc.channel as usize))
+                                .map(|(pitch, [_, voice_idx])| {
+                                    (pitch, *note_colors.index_cyc(voice_idx))
                                 })
                                 .collect(),
                             Track => notes_on
-                                .map(|note| (note.key, *note_colors.index_cyc(note.loc.track)))
+                                .map(|(pitch, [staff_idx, _])| {
+                                    (pitch, *note_colors.index_cyc(staff_idx))
+                                })
                                 .collect(),
                             KeyColor => notes_on
-                                .map(|note| {
-                                    (
-                                        note.key,
-                                        *note_colors.index_cyc(is_black_key(note.key) as usize),
-                                    )
+                                .map(|(pitch, _)| {
+                                    (pitch, *note_colors.index_cyc(is_black_key(pitch) as usize))
                                 })
                                 .collect(),
                         }
@@ -605,7 +610,10 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     let ranim_scroll_height = (egui_scroll_height / unit) as f64;
                     let scroll_time = (ranim_scroll_height / scroll_speed * 1e9) as u64;
                     let time_range = self.time..(scroll_time + self.time);
-                    let visible_notes = self.music.notes_between_iter(&time_range, key_range);
+                    let visible_notes = self
+                        .music
+                        .notes_overlaps_with_pos(&time_range)
+                        .filter(|((_, note), _)| key_range.contains(&note.pitch));
                     let notes_clip_rect = egui::Rect::from_min_size(
                         egui_view_top_left,
                         egui::vec2(egui_view_width, egui_scroll_height),
@@ -614,14 +622,16 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                         self.visualizer_config.keyboard_config.size.note_h_scale;
 
                     let time_to_y = |time: u64| {
-                        let y_diff =
-                            (time.abs_diff(self.time) as f64 / 1e9) as f32 * egui_scroll_speed;
+                        let y_diff = (time.abs_diff(self.time) as f64
+                            / self.music.resolution.get() as f64)
+                            as f32
+                            * egui_scroll_speed;
                         let y_diff = if time < self.time { y_diff } else { -y_diff };
                         y_diff + egui_key_origin.y
                     };
 
-                    let note_rect = |time_range: Range<u64>, note: MultiTrackMidiNote| {
-                        let (origin, is_black) = key_origin_and_color(note.key);
+                    let note_rect = |time_range: Range<u64>, note: Note| {
+                        let (origin, is_black) = key_origin_and_color(note.pitch);
                         let y_max = time_to_y(time_range.start);
                         let y_min = time_to_y(time_range.end);
                         let (x_min, x_max) = if is_black {
@@ -638,23 +648,26 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                         egui::Rect::from_two_pos(egui::pos2(x_min, y_min), egui::pos2(x_max, y_max))
                     };
 
-                    let note_shape = |time_range: Range<u64>, note: MultiTrackMidiNote| {
-                        let rect = note_rect(time_range, note).intersect(notes_clip_rect);
-                        let fill_color = {
-                            use ColorBy::*;
-                            match self.visualizer_config.color_by {
-                                Channel => *note_colors.index_cyc(note.loc.channel as usize),
-                                Track => *note_colors.index_cyc(note.loc.track),
-                                KeyColor => *note_colors.index_cyc(is_black_key(note.key) as usize),
+                    let note_shape =
+                        |time_range: Range<u64>, note: Note, [staff_idx, voice_idx]: [usize; 2]| {
+                            let rect = note_rect(time_range, note).intersect(notes_clip_rect);
+                            let fill_color = {
+                                use ColorBy::*;
+                                match self.visualizer_config.color_by {
+                                    Channel => *note_colors.index_cyc(voice_idx),
+                                    Track => *note_colors.index_cyc(staff_idx),
+                                    KeyColor => {
+                                        *note_colors.index_cyc(is_black_key(note.pitch) as usize)
+                                    }
+                                }
                             }
-                        }
-                        .to_opaque()
-                        .gamma_multiply(note.vel as f32 / 127.);
-                        epaint::RectShape::filled(rect, 0., fill_color)
-                    };
+                            .to_opaque()
+                            .gamma_multiply(f64::from(note.velocity) as f32);
+                            epaint::RectShape::filled(rect, 0., fill_color)
+                        };
 
-                    for (time_range, note) in visible_notes {
-                        p.add(note_shape(time_range, note));
+                    for ((time_range, note), pos) in visible_notes {
+                        p.add(note_shape(time_range.clone(), *note, pos));
                     }
                 }
             }

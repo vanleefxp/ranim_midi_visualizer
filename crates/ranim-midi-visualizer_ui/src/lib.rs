@@ -26,13 +26,17 @@ use ranim_midi_visualizer_math::func::LadderFn;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    num::NonZeroU64,
     path::PathBuf,
     sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
-use structured_midi::MidiMusic;
 use tracing::{error, info};
-use waveform_utils::synth::{NoteDirective, Synth};
+use typed_floats::tf64;
+use waveform_utils::{
+    music::{NoteContainer as _, RawMusic},
+    synth::{NoteDirective, Synth},
+};
 
 #[allow(unused)]
 enum ExportProgress {
@@ -53,7 +57,7 @@ pub(crate) static AUDIO_DEVICES: LazyLock<Vec<cpal::Device>> = LazyLock::new(|| 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MidiVisualizerAppCache {
     /// cache for NPS max function
-    nps_max: RefCell<Option<LadderFn<u64, f64>>>,
+    note_rate_max: RefCell<Option<LadderFn<u64, usize>>>,
     note_count: RefCell<Option<LadderFn<u64, usize>>>,
     added_tab: RefCell<Option<(MidiVisualizerTab, egui_dock::NodePath)>>,
     // synth: RefCell<Option<Synthesizer>>,
@@ -68,10 +72,10 @@ pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) synth: Arc<Mutex<dyn Synth>>,
     pub(crate) audio_device_idx: isize,
     pub(crate) test_sound_playing: bool,
-    pub(crate) notes_on: HashMap<i8, f64>,
+    pub(crate) notes_on: HashMap<i8, tf64::PositiveFinite>,
 
     /// the displaying MIDI music
-    pub(crate) music: Arc<MidiMusic>,
+    pub(crate) music: Arc<RawMusic>,
     /// soundfont for playing MIDI notes
 
     /// configuration of the MIDI visualizer
@@ -87,9 +91,7 @@ pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) play_start_t: Option<Instant>,
 
     /// time window for calculating NPS and legato index
-    pub(crate) time_window: u64,
-    /// total duration of the music
-    pub(crate) duration: u64,
+    pub(crate) time_window: NonZeroU64,
     /// video playback speed
     pub(crate) playback_speed: f64,
 
@@ -301,28 +303,22 @@ impl eframe::App for MidiVisualizerApp {
                 .inner
                 .inner
                 .music
-                .notes_between_iter(&time_range, &..)
-                .map(|(_, note)| (note.key, note.vel as f64 / 127.))
+                .notes_overlaps(&time_range)
+                .map(|(_, note)| (note.pitch, note.velocity))
                 .collect::<HashMap<_, _>>();
             let started_notes = new_notes_on
                 .iter()
                 .filter(|(k, _)| !notes_on.contains_key(k));
             let stopped_notes = notes_on
-                .iter()
-                .filter_map(|(k, _)| {
-                    if new_notes_on.contains_key(k) {
-                        None
-                    } else {
-                        Some(k)
-                    }
-                })
+                .keys()
+                .filter(|k| new_notes_on.contains_key(k))
                 .collect::<HashSet<_>>();
             let mut synth = self.inner.inner.synth.lock().unwrap();
             for (&pitch, &volume) in started_notes {
                 synth.directive(NoteDirective { pitch, volume }.into());
             }
             for &pitch in stopped_notes {
-                synth.directive(NoteDirective { pitch, volume: 0. }.into());
+                synth.directive(NoteDirective::new_off(pitch).into());
             }
             *notes_on = new_notes_on;
         }
@@ -494,13 +490,13 @@ impl MidiVisualizerAppInner {
                             let new_time = ((Instant::now() - start_t).as_nanos() as f64
                                 * self.playback_speed)
                                 as u64;
-                            if new_time > self.duration {
+                            if new_time > self.music.duration {
                                 if self.looping {
                                     // restarts from beginning
-                                    self.time = new_time % self.duration;
+                                    self.time = new_time % self.music.duration;
                                 } else {
                                     // pauses at final state
-                                    self.time = self.duration;
+                                    self.time = self.music.duration;
                                     self.play_start_t = None;
                                 }
                             } else {
@@ -583,10 +579,11 @@ impl MidiVisualizerAppInner {
                 // time slider
                 {
                     ui.style_mut().spacing.slider_width = ui.available_width();
-                    let slider = egui::Slider::new(&mut self.inner.time, 0..=self.inner.duration)
-                        .show_value(false)
-                        .handle_shape(egui::style::HandleShape::Circle);
-                    let resp = ui.add_enabled(self.inner.duration > 0, slider);
+                    let slider =
+                        egui::Slider::new(&mut self.inner.time, 0..=self.inner.music.duration)
+                            .show_value(false)
+                            .handle_shape(egui::style::HandleShape::Circle);
+                    let resp = ui.add_enabled(self.inner.music.duration > 0, slider);
                     if resp.changed() && self.is_playing() {
                         self.play();
                     }
@@ -607,7 +604,7 @@ impl MidiVisualizerAppInner {
             let cache = &mut preview_widget.cache;
             cache.note_count = Some(self.note_count());
             cache.note_count_total = Some(self.note_count_total());
-            cache.nps_max = Some(self.nps_max());
+            cache.note_rate_max = Some(self.note_rate_max());
 
             preview_widget.ui(ui);
         });
@@ -660,7 +657,7 @@ impl MidiVisualizerAppInner {
                             .update_while_editing(false)
                             .ui(ui);
                         if resp.drag_stopped() {
-                            self.cache.nps_max.borrow_mut().take();
+                            self.cache.note_rate_max.borrow_mut().take();
                         }
                         ui.label("s");
                     });

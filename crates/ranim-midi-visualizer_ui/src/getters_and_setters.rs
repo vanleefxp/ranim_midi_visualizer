@@ -9,9 +9,11 @@ use std::{
 use cpal::traits::{DeviceTrait as _, StreamTrait};
 use ranim::{Output, cmd::preview::Resolution};
 use ranim_midi_visualizer_math::func::LadderFn;
-use structured_midi::MidiMusic;
 use tracing::{error, info};
-use waveform_utils::synth::MusicDirective;
+use waveform_utils::{
+    music::{NoteContainer as _, RawMusic, parse_midi_raw},
+    synth::MusicDirective,
+};
 
 use crate::{
     AUDIO_DEVICES, MidiVisualizerApp, MidiVisualizerAppInner, MidiVisualizerAppInner2,
@@ -47,12 +49,12 @@ impl MidiVisualizerAppInner2 {
 impl MidiVisualizerAppInner {
     /// Precomputed maximum note-per-second (NPS) function for the entire music.
     /// Used to accelerate the computation of maximum NPS at a specific time.
-    fn nps_max_fn(&self) -> Ref<'_, LadderFn<u64, f64>> {
-        if self.cache.nps_max.borrow().is_none() {
-            let nps_max_fn = self.music.nps_max_fn(self.time_window);
-            self.cache.nps_max.replace(Some(nps_max_fn));
+    fn note_rate_max_fn(&self) -> Ref<'_, LadderFn<u64, usize>> {
+        if self.cache.note_rate_max.borrow().is_none() {
+            let nps_max_fn = self.music.note_rate_max_fn(self.time_window);
+            self.cache.note_rate_max.replace(Some(nps_max_fn));
         }
-        Ref::map(self.cache.nps_max.borrow(), |x| {
+        Ref::map(self.cache.note_rate_max.borrow(), |x| {
             x.as_ref().expect("`nps_max_fn` can't be `None`")
         })
     }
@@ -70,8 +72,8 @@ impl MidiVisualizerAppInner {
     }
 
     #[inline(always)]
-    pub(crate) fn nps_max(&self) -> f64 {
-        self.nps_max_fn()(&self.time)
+    pub(crate) fn note_rate_max(&self) -> usize {
+        self.note_rate_max_fn()(&self.time)
     }
 
     #[inline(always)]
@@ -118,8 +120,8 @@ impl MidiVisualizerApp {
 
     /// Maximum note-per-second (NPS) of the entire music before the current playing time.
     #[inline(always)]
-    pub fn nps_max(&self) -> f64 {
-        self.inner.nps_max()
+    pub fn note_rate_max(&self) -> usize {
+        self.inner.note_rate_max()
     }
 
     /// Number of notes already played before the current playing time.
@@ -148,7 +150,7 @@ impl MidiVisualizerAppInner2 {
             .lock()
             .unwrap()
             .directive(MusicDirective::PlayPause(true));
-        if self.time >= self.music.duration() {
+        if self.time >= self.music.duration {
             self.time = 0;
             self.play_start_t = Some(Instant::now());
         } else {
@@ -190,7 +192,7 @@ impl MidiVisualizerAppInner2 {
         // maybe define a new `StepGrid` struct with `large_step` and `small_step` fields
         let dt = 100_000_000 / self.export_config.fps as u64 * n.unsigned_abs() as u64;
         if n >= 0 {
-            self.time = (self.time + dt).min(self.duration);
+            self.time = (self.time + dt).min(self.music.duration);
         } else if self.time > dt {
             self.time -= dt;
         } else {
@@ -211,14 +213,13 @@ impl MidiVisualizerAppInner2 {
 
     pub(crate) fn jump_to_end(&mut self) {
         self.play_start_t = None;
-        self.time = self.duration;
+        self.time = self.music.duration;
     }
 
-    pub(crate) fn set_music(&mut self, music: MidiMusic) {
+    pub(crate) fn set_music(&mut self, music: RawMusic) {
         self.pause();
         self.music = Arc::new(music);
         self.time = 0;
-        self.duration = self.music.duration();
     }
 
     pub(crate) fn show_open_dialog(&mut self) {
@@ -233,7 +234,7 @@ impl MidiVisualizerAppInner2 {
 
     pub(crate) fn load_midi_file(&mut self, path: &PathBuf) {
         match std::fs::read(path) {
-            Ok(src) => match MidiMusic::try_from(src.as_slice()) {
+            Ok(src) => match parse_midi_raw(src.as_slice()) {
                 Ok(music) => {
                     self.set_music(music);
                     self.midi_file = Some(path.clone());
@@ -249,7 +250,7 @@ impl MidiVisualizerAppInner2 {
     }
 
     pub(crate) fn load_midi_bytes(&mut self, src: &[u8]) {
-        match MidiMusic::try_from(src) {
+        match parse_midi_raw(src) {
             Ok(music) => {
                 self.set_music(music);
             }
@@ -354,9 +355,9 @@ impl MidiVisualizerAppInner2 {
 }
 
 impl MidiVisualizerAppInner {
-    pub(crate) fn set_music(&mut self, music: MidiMusic) {
+    pub(crate) fn set_music(&mut self, music: RawMusic) {
         self.inner.set_music(music);
-        self.cache.nps_max.take();
+        self.cache.note_rate_max.take();
         self.cache.note_count.take();
     }
 }
@@ -400,7 +401,7 @@ impl MidiVisualizerApp {
 
     /// Set the currently opened music to visualize.
     #[inline(always)]
-    pub fn set_music(&mut self, music: MidiMusic) {
+    pub fn set_music(&mut self, music: RawMusic) {
         self.inner.set_music(music);
     }
 

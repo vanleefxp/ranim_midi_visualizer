@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    num::NonZeroU64,
+    sync::{Arc, Mutex},
+};
 
 use eframe::egui;
 use waveform_utils::synth::SimpleWaveformSynth;
@@ -21,8 +24,8 @@ impl Default for MidiVisualizerAppInner2 {
             looping: false,
             play_start_t: None,
 
-            time_window: 1_000_000_000, // 1 second
-            duration: 0,
+            // SAFETY: positive literal
+            time_window: unsafe { NonZeroU64::new_unchecked(1_000_000_000) }, // 1 second
             playback_speed: 1.0,
 
             export_config: Default::default(),
