@@ -29,7 +29,7 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, midly::Error> {
         Err(e) => {
             error!("{:?}", e);
             return Err(e);
-        },
+        }
     };
 
     // TODO: handle sequential multiple tracks
@@ -41,8 +41,8 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, midly::Error> {
             Ok(event_iter) => event_iter,
             Err(e) => {
                 error!("{:?}", e);
-                return Err(e)
-            },
+                return Err(e);
+            }
         };
         debug!("New track!");
 
@@ -58,8 +58,8 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, midly::Error> {
                 Ok(event) => event,
                 Err(e) => {
                     debug!("{:?}", e);
-                    return Err(e)
-                },
+                    return Err(e);
+                }
             };
             debug!("{:?}", event);
 
@@ -80,44 +80,46 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, midly::Error> {
                         NoteOn {
                             key: pitch,
                             vel: velocity,
-                        } | NoteOff { key: pitch, vel: velocity } => {
+                        } if velocity > 0 => {
                             // regularize pitch to middle C as 0
                             let pitch = pitch.as_int() as i8 - 60;
 
-                            if velocity > 0 {
-                                // regularize velocity to 0.0..=1.0 range
-                                let velocity =
-                                    tf64::PositiveFinite::new(velocity.as_int() as f64 / 127.0)
-                                        .unwrap();
-                                // insert note into the note states table
-                                let note = Note { pitch, velocity };
-                                note_states
-                                    .entry((voice, pitch))
-                                    .or_default()
-                                    .push((cur_time, note));
-                            } else {
-                                let should_remove =
-                                    if let Some(notes) = note_states.get_mut(&(voice, pitch)) {
-                                        // SAFETY: `notes` must be non-empty at this point, so we can unwrap it safely.
-                                        let (start_time, note) = notes.pop().unwrap();
-                                        let voice = voice as usize;
+                            // regularize velocity to 0.0..=1.0 range
+                            let velocity =
+                                tf64::PositiveFinite::new(velocity.as_int() as f64 / 127.0)
+                                    .unwrap();
+                            // insert note into the note states table
+                            let note = Note { pitch, velocity };
+                            note_states
+                                .entry((voice, pitch))
+                                .or_default()
+                                .push((cur_time, note));
+                        }
+                        NoteOn { key: pitch, .. } | NoteOff { key: pitch, .. } => {
+                            // regularize pitch to middle C as 0
+                            let pitch = pitch.as_int() as i8 - 60;
 
-                                        // insert note into the voice's interval tree
-                                        if staff.voices.len() < voice + 1 {
-                                            staff.voices.resize_with(voice + 1, Default::default);
-                                        }
-                                        staff.voices[voice].notes.insert(start_time..cur_time, note);
-                                        notes.is_empty()
-                                    } else {
-                                        false
-                                    };
+                            let should_remove =
+                                if let Some(notes) = note_states.get_mut(&(voice, pitch)) {
+                                    // SAFETY: `notes` must be non-empty at this point, so we can unwrap it safely.
+                                    let (start_time, note) = notes.pop().unwrap();
+                                    let voice = voice as usize;
 
-                                // remove the `SmallVec` associated with the note state if it's empty
-                                if should_remove {
-                                    note_states.remove(&(voice, pitch));
-                                }
+                                    // insert note into the voice's interval tree
+                                    if staff.voices.len() < voice + 1 {
+                                        staff.voices.resize_with(voice + 1, Default::default);
+                                    }
+                                    staff.voices[voice].notes.insert(start_time..cur_time, note);
+                                    notes.is_empty()
+                                } else {
+                                    false
+                                };
+
+                            // remove the `SmallVec` associated with the note state if it's empty
+                            if should_remove {
+                                note_states.remove(&(voice, pitch));
                             }
-                        },
+                        }
                         Controller { controller, value } => {
                             use Pedal::*;
                             let pedal = match controller.as_int() {
@@ -166,6 +168,8 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, midly::Error> {
 #[cfg(test)]
 mod tests {
     use tracing_test::traced_test;
+
+    use super::super::{ControlContainer as _, NoteContainer as _};
     use super::*;
 
     #[traced_test]
@@ -174,7 +178,9 @@ mod tests {
         let src = include_bytes!("tests/little-star.mid").as_slice();
         let music = parse_midi_raw(src);
         assert!(music.is_ok());
-        println!("{:?}", music.unwrap());
+        let music = music.unwrap();
+        assert!(music.notes_by_start().next().is_some());
+        println!("{:?}", music);
     }
 
     #[traced_test]
@@ -183,6 +189,9 @@ mod tests {
         let src = include_bytes!("tests/song_2.mid").as_slice();
         let music = parse_midi_raw(src);
         assert!(music.is_ok());
+        let music = music.unwrap();
+        assert!(music.notes_by_start().next().is_some());
+        assert!(music.controls().next().is_some());
     }
 
     #[traced_test]
@@ -191,6 +200,9 @@ mod tests {
         let src = include_bytes!("tests/the-egg-of-our-hearts.mid").as_slice();
         let music = parse_midi_raw(src);
         assert!(music.is_ok());
+        let music = music.unwrap();
+        assert!(music.notes_by_start().next().is_some());
+        assert!(music.controls().next().is_some());
     }
 
     #[traced_test]
@@ -198,14 +210,19 @@ mod tests {
     fn test_parse_not_midi() {
         let src = include_bytes!("tests/not-midi.txt").as_slice();
         let music = parse_midi_raw(src);
-        assert!(music.is_err()); // should return an error
+        assert!(music.is_err());
     }
 
     #[traced_test]
     #[test]
     fn test_parse_midi_corrupted() {
         let mut src = include_bytes!("tests/little-star.mid").to_vec();
-        src.iter_mut().skip(4).step_by(2).take(10).for_each(|v| *v = 255);
+        // overwrite some bytes to corrupt the file
+        src.iter_mut()
+            .skip(4)
+            .step_by(2)
+            .take(10)
+            .for_each(|v| *v = 255);
         let music = parse_midi_raw(src.as_slice());
         assert!(music.is_err());
     }
