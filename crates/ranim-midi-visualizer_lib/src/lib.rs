@@ -1,7 +1,8 @@
 pub mod stroke_and_fill;
 
-use std::ops::Range;
+use std::{num::NonZero, ops::Range};
 
+use derivative::Derivative;
 use itertools::Itertools as _;
 use music_utils::is_black_key;
 use ranim::{
@@ -21,7 +22,9 @@ use ranim::{
 use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 
 use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardConfig, PianoPedals};
-use structured_midi::{MidiMusic, MultiTrackLoc, MultiTrackMidiNote, MultiTrackPedalInstant};
+use simple_interval_tree::Endpoint;
+use typed_floats::tf64;
+use waveform_utils::music::{ControlContainer as _, NoteContainer as _, RawMusic};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -86,59 +89,55 @@ impl Default for ProgressBarConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Derivative)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derivative(Clone, Debug, Default)]
 // #[non_exhaustive]
 pub struct MidiVisualizerConfig {
+    #[derivative(Default(value = r#"
+        vec![
+            rgb8(0x89, 0xb9, 0xeb),
+            rgb8(0x9b, 0xe3, 0x47),
+            rgb8(0xf7, 0x93, 0x1e),
+            rgb8(0xf7, 0xc7, 0x1e),
+        ]
+    "#))]
     pub colors: Vec<AlphaColor<Srgb>>,
-    pub scroll_speed: f64,
+    #[derivative(Default(value = "2.0.try_into().unwrap()"))]
+    pub scroll_speed: tf64::StrictlyPositiveFinite,
+    #[derivative(Default(value = "ColorBy::Channel"))]
     pub color_by: ColorBy,
-    pub buf_time: [f64; 2],
+    #[derivative(Default(value = "[2.0.try_into().unwrap(), 2.0.try_into().unwrap()]"))]
+    pub buf_time: [tf64::PositiveFinite; 2],
     pub keyboard_config: PianoKeyboardConfig,
     pub status_bar_config: StatusBarConfig,
     pub progress_bar_config: ProgressBarConfig,
-    pub time_window: f64,
+    #[derivative(Default(value = "1.0.try_into().unwrap()"))]
+    pub time_window: tf64::StrictlyPositive,
     #[serde(skip)]
+    #[derivative(Default(value = r#"
+        TextFont::new([
+            "Maple Mono NF",
+            "Cascadia Code NF",
+            "LXGW WenKai Mono",
+            "Consolas",
+            "Monaco",
+            "Courier New",
+        ])
+    "#))]
     pub text_font: TextFont,
-}
-
-impl Default for MidiVisualizerConfig {
-    fn default() -> Self {
-        Self {
-            colors: vec![
-                rgb8(0x89, 0xb9, 0xeb),
-                rgb8(0x9b, 0xe3, 0x47),
-                rgb8(0xf7, 0x93, 0x1e),
-                rgb8(0xf7, 0xc7, 0x1e),
-            ],
-            color_by: ColorBy::Channel,
-            scroll_speed: 2.,
-            buf_time: [2., 2.],
-            keyboard_config: Default::default(),
-            status_bar_config: Default::default(),
-            progress_bar_config: Default::default(),
-            time_window: 1.,
-            text_font: TextFont::new([
-                "Maple Mono NF",
-                "Cascadia Code NF",
-                "LXGW WenKai Mono",
-                "Consolas",
-                "Monaco",
-                "Courier New",
-            ]),
-        }
-    }
 }
 
 pub fn midi_visualizer_scene(
     r: &mut RanimScene,
-    song: &MidiMusic,
+    song: &RawMusic,
     config: &MidiVisualizerConfig,
     resolution: Resolution,
 ) {
     let cam = CameraFrame::default();
     r.insert(cam.clone());
 
+    let time_resolution = song.resolution;
     let &MidiVisualizerConfig {
         scroll_speed,
         color_by,
@@ -150,11 +149,12 @@ pub fn midi_visualizer_scene(
                 ..
             },
         time_window,
+        ref colors,
         ..
     } = config;
-    let colors = &config.colors;
+    let time_window =
+        NonZero::try_from((f64::from(time_window) * time_resolution.get() as f64) as u64).unwrap();
     let font = config.text_font.clone();
-    let time_window_nano = (time_window * 1e9) as u64;
 
     let frame_height = cam.frame_height;
     let frame_width = frame_height * resolution.width as f64 / resolution.height as f64;
@@ -229,14 +229,16 @@ pub fn midi_visualizer_scene(
         .discard()
     });
 
-    let scroll_height = frame_height - i_keyboard_tem.aabb_size().y;
+    let scroll_height =
+        tf64::PositiveFinite::try_from(frame_height - i_keyboard_tem.aabb_size().y).unwrap();
     let scroll_time = scroll_height / scroll_speed;
-    let duration = song.duration() as f64 / 1e9;
+    let duration = song.duration as f64 / time_resolution.get() as f64;
 
-    let midi_time_to_scene_time =
-        |midi_time: u64| midi_time as f64 / 1e9 + buf_time[0] + scroll_time;
+    let to_seconds = |time: u64| time as f64 / time_resolution.get() as f64;
+    let to_scene_time =
+        |midi_time: u64| to_seconds(midi_time) + f64::from(buf_time[0] + scroll_time);
 
-    let instants = song.instants().collect::<Vec<_>>();
+    // let instants = song.instants().collect::<Vec<_>>();
     let text_origin = |n_columns: usize, column: usize| {
         let available_width = frame_width - padding[0].x - padding[1].x;
         let dx = available_width / n_columns as f64 * column as f64 + padding[0].x;
@@ -259,7 +261,7 @@ pub fn midi_visualizer_scene(
         let i_progress_bar_final =
             Rectangle::from_min_size(progress_bar_min, dvec2(frame_width, progress_bar_height))
                 .with(progress_bar_setup);
-        tl.forward_to(buf_time[0] + scroll_time).play(
+        tl.forward_to(to_scene_time(0)).play(
             i_progress_bar
                 .morph_to(i_progress_bar_final)
                 .with_duration(duration)
@@ -294,7 +296,7 @@ pub fn midi_visualizer_scene(
         });
 
         tl.play(create_timer_text(0.).show())
-            .forward_to(buf_time[0] + scroll_time)
+            .forward_to(to_scene_time(0))
             .play(
                 timer_anim
                     .into_animation_cell()
@@ -302,14 +304,14 @@ pub fn midi_visualizer_scene(
                     .with_rate_func(linear),
             )
             .play(create_timer_text(duration).show())
-            .forward(buf_time[1]);
+            .forward(buf_time[1].into());
     });
 
     // Note Count
     //
     r.insert_with(|tl| {
         let origin = text_origin(4, 1);
-        let note_count_total = song.notes().count();
+        let note_count_total = song.note_count();
         let create_note_count_text = |n: usize| {
             let src = format!("NOTE COUNT {n} / {note_count_total}");
             TextItem::new(src, font_size)
@@ -319,9 +321,10 @@ pub fn midi_visualizer_scene(
 
         let mut i_note_count = create_note_count_text(0);
         tl.play(i_note_count.show());
+
         for (time, note_count) in song
             .note_count_iter()
-            .map(|(time, note_count)| (midi_time_to_scene_time(time), note_count))
+            .map(|(time, note_count)| (to_scene_time(time), note_count))
         {
             tl.forward_to(time).play(i_note_count.hide());
             i_note_count = create_note_count_text(note_count);
@@ -332,29 +335,35 @@ pub fn midi_visualizer_scene(
     // Note Per Second
     r.insert_with(|tl| {
         let origin = text_origin(4, 2);
-        let create_nps_text = |nps: f64, nps_max: f64| {
+
+        let note_rate_to_nps = |note_rate: usize| {
+            note_rate as f64 * time_resolution.get() as f64 / time_window.get() as f64
+        };
+        let create_nps_text = |note_rate: usize, note_rate_max: usize| {
+            let nps = note_rate_to_nps(note_rate);
+            let nps_max = note_rate_to_nps(note_rate_max);
             TextItem::new(format!("NPS (MAX) {nps:.0} ({nps_max:.0})"), font_size)
                 .with_font(font.clone())
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
 
-        let mut nps_max = 0.;
-        let mut i_nps_text = create_nps_text(0., 0.);
+        let mut note_rate_max = 0;
+        let mut i_nps_text = create_nps_text(0, 0);
         tl.play(i_nps_text.show());
         for (time, nps) in song
-            .nps_iter(time_window_nano)
-            .map(|(time, nps)| (midi_time_to_scene_time(time), nps))
+            .note_rate_iter(time_window)
+            .map(|(time, nps)| (to_scene_time(time), nps))
         {
-            nps_max = nps.max(nps_max);
+            note_rate_max = nps.max(note_rate_max);
             tl.forward_to(time).play(i_nps_text.hide());
-            i_nps_text = create_nps_text(nps, nps_max);
+            i_nps_text = create_nps_text(nps, note_rate_max);
             tl.play(i_nps_text.show());
         }
     });
 
     // Legato Index
     r.insert_with(|tl| {
-        let legato_score_fn = song.legato_fn(time_window_nano);
+        let legato_score_fn = song.legato_fn(time_window);
         let origin = text_origin(4, 3);
 
         // font and font size are config variables
@@ -371,8 +380,7 @@ pub fn midi_visualizer_scene(
         if let Some((&t0, _)) = legato_score_fn.iter().next() {
             // value before `t0` should be 0.
             // because no note is in the window
-            tl.forward_to(midi_time_to_scene_time(t0))
-                .play(i_text.hide());
+            tl.forward_to(to_scene_time(t0)).play(i_text.hide());
             for ((_, &v1), (&t2, &v2)) in legato_score_fn.iter().tuple_windows() {
                 // clone values so that they can be moved into the closure
                 let create_legato_text = create_legato_text.clone();
@@ -384,7 +392,7 @@ pub fn midi_visualizer_scene(
                     anim.into_animation_cell()
                         // duration calculated by the desired end time minus the current time
                         // to avoid float accumulation error
-                        .with_duration(t2 as f64 / 1e9 + buf_time[0] + scroll_time - tl.cur_sec())
+                        .with_duration(to_scene_time(t2) - tl.cur_sec())
                         .with_rate_func(linear),
                 );
             }
@@ -396,28 +404,33 @@ pub fn midi_visualizer_scene(
     // keyboard animation
     r.insert_with(|tl| {
         let mut i_keyboard = i_keyboard_tem.clone();
-        tl.play(i_keyboard.show())
-            .forward(buf_time[0] + scroll_time);
+        tl.play(i_keyboard.show()).forward(to_scene_time(0));
 
-        for instant in instants.iter() {
-            tl.forward_to(instant.time as f64 / 1e9 + buf_time[0] + scroll_time);
+        for (ep, [staff_idx, voice_idx]) in song.note_instants_with_pos() {
+            let Endpoint {
+                is_end,
+                at: &time,
+                pair: (_, note),
+            } = ep;
+
+            tl.forward_to(to_scene_time(time));
             tl.play(i_keyboard.hide());
             i_keyboard = i_keyboard.with(|item| {
-                let key = instant.key();
+                let key = note.pitch;
 
-                if instant.is_start() {
+                if is_end {
                     item.highlight_keys(|m| {
-                        use ColorBy::*;
-                        let color = *colors.index_cyc(match color_by {
-                            Channel => instant.loc.channel as usize,
-                            Track => instant.loc.track,
-                            KeyColor => is_black_key(key) as usize,
-                        });
-                        m.insert(key, color);
+                        m.remove(&key);
                     });
                 } else {
                     item.highlight_keys(|m| {
-                        m.remove(&key);
+                        use ColorBy::*;
+                        let color = *colors.index_cyc(match color_by {
+                            Channel => voice_idx,
+                            Track => staff_idx,
+                            KeyColor => is_black_key(key) as usize,
+                        });
+                        m.insert(key, color);
                     });
                 }
             });
@@ -426,23 +439,18 @@ pub fn midi_visualizer_scene(
     });
 
     // note animations
-    for (range, note) in song.notes() {
-        let Range { start, end } = range;
-        let MultiTrackMidiNote {
-            loc: MultiTrackLoc { track, channel },
-            key,
-            vel,
-        } = note;
+    for ((range, note), [staff_idx, voice_idx]) in song.notes_by_start_with_pos() {
+        let &Range { start, end } = range;
 
-        let t_start = start as f64 / 1e9 + buf_time[0];
-        let duration = (end - start) as f64 / 1e9;
+        let t_start = to_seconds(start) + f64::from(buf_time[0]);
+        let duration = to_seconds(end - start);
 
         let color = {
             use ColorBy::*;
             *colors.index_cyc(match color_by {
-                Channel => channel as usize,
-                Track => track,
-                KeyColor => is_black_key(key) as usize,
+                Channel => voice_idx,
+                Track => staff_idx,
+                KeyColor => is_black_key(note.pitch) as usize,
             })
         };
 
@@ -451,14 +459,14 @@ pub fn midi_visualizer_scene(
             i_keyboard_tem.anim_note(
                 tl,
                 |item| {
-                    item.set_fill_color(color.with_alpha(vel as f32 / 127.))
+                    item.set_fill_color(color.with_alpha(f64::from(note.velocity) as f32))
                         .set_stroke_color(AlphaColor::TRANSPARENT);
                     item.stroke_width = 0.;
                 },
-                key,
+                note.pitch,
                 duration,
-                scroll_speed,
-                scroll_height,
+                scroll_speed.into(),
+                scroll_height.into(),
             );
             tl.hide();
         });
@@ -467,21 +475,13 @@ pub fn midi_visualizer_scene(
     // Pedals
     r.insert_with(|tl| {
         let mut i_pedals = i_pedals_tem.clone();
-        tl.play(i_pedals.show()).forward(buf_time[0] + scroll_time);
+        tl.play(i_pedals.show()).forward(to_scene_time(0));
 
-        for instant in song.pedals() {
-            let MultiTrackPedalInstant {
-                // loc: MultiTrackLoc { track, channel },
-                pedal_type,
-                value,
-                time,
-                ..
-            } = instant;
-            let pedal_type = Pedal::try_from(pedal_type as u8).expect("should be successful");
-            tl.forward_to(midi_time_to_scene_time(time))
-                .play(i_pedals.hide());
+        for (time, control) in song.controls() {
+            let pedal_type = Pedal::try_from(control.pedal as u8).expect("should be successful");
+            tl.forward_to(to_scene_time(time)).play(i_pedals.hide());
             i_pedals = i_pedals.with(|item| {
-                item.set_pedal_status(pedal_type, value);
+                item.set_pedal_status(pedal_type, control.depth.into());
             });
             tl.play(i_pedals.show());
         }
@@ -489,7 +489,7 @@ pub fn midi_visualizer_scene(
 }
 
 pub fn render_midi_visualizer(
-    song: &MidiMusic,
+    song: &RawMusic,
     name: &str,
     visualizer_config: &MidiVisualizerConfig,
     scene_config: &SceneConfig,
