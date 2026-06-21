@@ -66,3 +66,21 @@ where
         self._call(args.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ladder_fn() {
+        let f = LadderFn::from_iter([(0, 1), (4, 2), (6, 4)]);
+        assert_eq!(f(&-1), 1);
+        assert_eq!(f(&0), 1);
+        assert_eq!(f(&2), 1);
+        assert_eq!(f(&3), 1);
+        assert_eq!(f(&4), 2);
+        assert_eq!(f(&5), 2);
+        assert_eq!(f(&6), 4);
+        assert_eq!(f(&7), 4);
+    }
+}
