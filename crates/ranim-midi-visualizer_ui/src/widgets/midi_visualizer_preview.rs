@@ -359,15 +359,16 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
 
                 let highlighted_keys: HashMap<_, _> = {
                     let time_range = self.time..=self.time;
-                    let notes_on = self.music.notes_overlaps_with_pos(&time_range).filter_map(
-                        |((_, note), pos)| {
-                            if key_range.contains(&note.pitch) {
-                                Some((note.pitch, pos))
-                            } else {
-                                None
-                            }
-                        },
-                    );
+                    let notes_on =
+                        self.music
+                            .notes_overlaps(&time_range)
+                            .filter_map(|(pos, _, note)| {
+                                if key_range.contains(&note.pitch) {
+                                    Some((note.pitch, pos))
+                                } else {
+                                    None
+                                }
+                            });
                     {
                         use ColorBy::*;
                         match color_by {
@@ -612,8 +613,8 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     let time_range = self.time..(scroll_time + self.time);
                     let visible_notes = self
                         .music
-                        .notes_overlaps_with_pos(&time_range)
-                        .filter(|((_, note), _)| key_range.contains(&note.pitch));
+                        .notes_overlaps(&time_range)
+                        .filter(|(_, _, note)| key_range.contains(&note.pitch));
                     let notes_clip_rect = egui::Rect::from_min_size(
                         egui_view_top_left,
                         egui::vec2(egui_view_width, egui_scroll_height),
@@ -666,7 +667,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                             epaint::RectShape::filled(rect, 0., fill_color)
                         };
 
-                    for ((time_range, note), pos) in visible_notes {
+                    for (pos, time_range, note) in visible_notes {
                         p.add(note_shape(time_range.clone(), *note, pos));
                     }
                 }

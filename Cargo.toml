@@ -85,6 +85,7 @@ proc-macro2 = "1.0.106"
 quote = "1.0.45"
 syn = "2.0.118"
 anyhow = "1.0.101"
+thiserror = "2.0.18"
 tracing-test = "0.2.6"
 
 [workspace.dependencies.ranim]

@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+\.[0-9]+\.[0-9]+(?:-(?:alpha|beta|rc))'
     branches: ["ci/release-*"]
   # to test the workflow
   pull_request:

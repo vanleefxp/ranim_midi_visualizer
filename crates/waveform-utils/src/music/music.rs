@@ -86,8 +86,10 @@ impl<Pitch, Control> Music<Pitch, Control> {
         if time_map.is_none() {
             *time_map = Some(generate_time_map(
                 &self.tempo,
+                self.inner.duration,
                 self.resolution,
                 self.time_resolution,
+                false,
             ));
         }
         RwLockReadGuard::map(
@@ -116,7 +118,7 @@ impl<Pitch, Control> From<Music<Pitch, Control>> for RawMusic<Pitch, Control> {
         } = value;
         let time_map = match time_map.into_inner().unwrap() {
             Some(v) => v,
-            None => generate_time_map(&tempo, beat_resolution, time_resolution),
+            None => generate_time_map(&tempo, duration, beat_resolution, time_resolution, false),
         };
         let staves = staves.into_iter().map(|v| v.remap(&time_map)).collect();
         let duration = time_map.eval(&duration, true);

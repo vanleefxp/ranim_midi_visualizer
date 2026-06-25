@@ -1,77 +1,108 @@
 use std::{
+    alloc::Allocator,
     collections::BTreeMap,
     num::NonZeroU64,
-    ops::{Range, RangeBounds},
+    ops::{Bound::*, IntoBounds as _, Range, RangeBounds},
 };
 
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
-use simple_interval_tree::Endpoint;
+use simple_interval_tree::{Endpoint, IntervalTree};
 
 use super::{Metric, Note};
 
-pub trait NoteContainer<'a, Pitch: 'a> {
-    fn notes_by_start(&'a self) -> impl Iterator<Item = &'a (Range<Metric>, Note<Pitch>)>;
+pub struct NoteInstant<'a, Pitch: 'a> {
+    pub is_end: bool,
+    pub at: Metric,
+    pub pair: (Range<Metric>, &'a Note<Pitch>),
+}
+
+impl<'a, Pitch: 'a> From<Endpoint<'a, Metric, Note<Pitch>>> for NoteInstant<'a, Pitch> {
+    fn from(value: Endpoint<'a, Metric, Note<Pitch>>) -> Self {
+        let Endpoint {
+            is_end,
+            at,
+            pair: (range, note),
+        } = value;
+        let at = *at;
+        let range = range.clone();
+        NoteInstant {
+            is_end,
+            at,
+            pair: (range, note),
+        }
+    }
+}
+
+pub trait NoteContainer {
+    type Pitch;
+    type Pos = ();
+    // notes_*_with_pos: generate position (e.g. on which staff / voice are the notes)
+    // together with notes and their corresponding time ranges
+
+    fn notes_by_start(
+        &self,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>;
 
     fn notes_during<G>(
-        &'a self,
+        &self,
         range: &G,
-    ) -> impl Iterator<Item = &'a (Range<Metric>, Note<Pitch>)>
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
         G: RangeBounds<Metric>;
 
     fn notes_overlaps<G>(
-        &'a self,
+        &self,
         range: &G,
-    ) -> impl Iterator<Item = &'a (Range<Metric>, Note<Pitch>)>
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
         G: RangeBounds<Metric>;
 
-    fn notes_starts_during<G>(
-        &'a self,
+    fn notes_start_during<G>(
+        &self,
         range: &G,
-    ) -> impl Iterator<Item = &'a (Range<Metric>, Note<Pitch>)>
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
         G: RangeBounds<Metric>;
 
-    fn notes_ends_during<G>(
-        &'a self,
+    fn notes_end_during<G>(
+        &self,
         range: &G,
-    ) -> impl Iterator<Item = &'a (Range<Metric>, Note<Pitch>)>
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
         G: RangeBounds<Metric>;
 
-    fn note_instants_during<G>(
+    fn note_instants_during<'a, G>(
         &'a self,
         range: &G,
-    ) -> impl Iterator<Item = Endpoint<'a, Metric, Note<Pitch>>>
+    ) -> impl Iterator<Item = (Self::Pos, NoteInstant<'a, Self::Pitch>)>
     where
         G: RangeBounds<Metric>;
 
-    fn note_instants(&'a self) -> impl Iterator<Item = Endpoint<'a, Metric, Note<Pitch>>> {
+    fn note_instants(&self) -> impl Iterator<Item = (Self::Pos, NoteInstant<'_, Self::Pitch>)> {
         self.note_instants_during(&..)
     }
 
-    fn note_count(&'a self) -> usize {
+    fn note_count(&self) -> usize {
         self.notes_by_start().count()
     }
 
-    fn note_count_iter(&'a self) -> impl Iterator<Item = (Metric, usize)> {
-        self.notes_by_start().scan(0usize, |count, (range, _)| {
+    fn note_count_iter(&self) -> impl Iterator<Item = (Metric, usize)> {
+        self.notes_by_start().scan(0usize, |count, (_, range, _)| {
             *count += 1;
             Some((range.start, *count))
         })
     }
 
-    fn note_count_fn(&'a self) -> LadderFn<Metric, usize> {
+    fn note_count_fn(&self) -> LadderFn<Metric, usize> {
         self.note_count_iter().collect()
     }
 
-    fn note_rate_iter(&'a self, window: NonZeroU64) -> impl Iterator<Item = (Metric, usize)> {
+    fn note_rate_iter(&self, window: NonZeroU64) -> impl Iterator<Item = (Metric, usize)> {
         // instants where the start of notes enter or exit the time window
         // and how many notes flows in or out at the instant
         // NPS value only changes at these instants
         let mut nps_changes: BTreeMap<Metric, isize> = BTreeMap::new();
-        for (range, _) in self.notes_by_start() {
+        for (_, range, _) in self.notes_by_start() {
             let enter_time = range.start;
             let exit_time = range.start + window.get();
             nps_changes
@@ -97,11 +128,15 @@ pub trait NoteContainer<'a, Pitch: 'a> {
             })
     }
 
-    fn note_rate_fn(&'a self, window: NonZeroU64) -> LadderFn<Metric, usize> {
+    fn note_rate_fn(&self, window: NonZeroU64) -> LadderFn<Metric, usize> {
         self.note_rate_iter(window).collect()
     }
 
-    fn note_rate(&self, time: u64, window: NonZeroU64) -> usize;
+    /// Number of notes played in the time window.
+    fn note_rate(&self, time: u64, window: NonZeroU64) -> usize {
+        let time_range = time.saturating_sub(window.get())..time;
+        self.notes_start_during(&time_range).count()
+    }
 
     /// **Legato index** is a measure describing how continuously a series of notes are played.
     /// This index was put forward by Wiwi Kuan in his Pianometer program.
@@ -113,10 +148,25 @@ pub trait NoteContainer<'a, Pitch: 'a> {
     /// + sum the lengths of the intersecting parts of the notes and the time window
     /// + divide the sum by the length of the time window
     ///
-    fn legato_index(&self, time: u64, window: NonZeroU64) -> f64;
+    fn legato_index(&self, time: u64, window: NonZeroU64) -> f64 {
+        let time_range = time.saturating_sub(window.get())..time;
+        let duration_sum: u64 = {
+            self.notes_overlaps(&time_range)
+                .map(|(_, range, _)| range.clone())
+                .map(|range| {
+                    let (start, end) = time_range.clone().intersect(range);
+                    match (start, end) {
+                        (Included(a) | Excluded(a), Included(b) | Excluded(b)) => a.abs_diff(b),
+                        _ => unreachable!(),
+                    }
+                })
+                .sum()
+        };
+        duration_sum as f64 / window.get() as f64
+    }
 
     /// Calculates the legato index of the whole song. The returned result is a callable function.
-    fn legato_fn(&'a self, window: NonZeroU64) -> SegmentedLinearFn<u64, f64> {
+    fn legato_fn(&self, window: NonZeroU64) -> SegmentedLinearFn<u64, f64> {
         // `legato_index` calculate the legato index directly by definition,
         // However, for the computation of legato index of the whole song, this approach can be optimized given the
         // observation that the changing of legato index is a segmented linear function to time.
@@ -125,9 +175,8 @@ pub trait NoteContainer<'a, Pitch: 'a> {
         // to get the total legato score function of the song.
         // So the first step is to create the legato score function for each note.
         self.notes_by_start()
-            .map(|(range, _)| {
+            .map(|(_, Range { start, end }, _)| {
                 // When it comes to the calculation of single-note legato score function, there are two cases:
-                let &Range { start, end } = range;
                 let duration = end - start;
                 let window = window.get();
 
@@ -167,7 +216,7 @@ pub trait NoteContainer<'a, Pitch: 'a> {
             .sum()
     }
 
-    fn note_rate_max_iter(&'a self, window: NonZeroU64) -> impl Iterator<Item = (Metric, usize)> {
+    fn note_rate_max_iter(&self, window: NonZeroU64) -> impl Iterator<Item = (Metric, usize)> {
         self.note_rate_iter(window)
             .scan(0, |nps_max, (time, nps)| {
                 if nps > *nps_max {
@@ -180,7 +229,70 @@ pub trait NoteContainer<'a, Pitch: 'a> {
             .flatten()
     }
 
-    fn note_rate_max_fn(&'a self, window: NonZeroU64) -> LadderFn<Metric, usize> {
+    fn note_rate_max_fn(&self, window: NonZeroU64) -> LadderFn<Metric, usize> {
         self.note_rate_max_iter(window).collect()
+    }
+}
+
+macro with_pos($iter:expr) {
+    $iter.map(|(range, note)| ((), range.clone(), note))
+}
+
+macro instants_with_pos($iter:expr) {
+    $iter.map(|instant| ((), instant.into()))
+}
+
+impl<Pitch, A: Allocator + Clone> NoteContainer for IntervalTree<Metric, Note<Pitch>, A> {
+    type Pitch = Pitch;
+
+    fn notes_by_start(&self) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)> {
+        with_pos!(self.iter_by_start())
+    }
+
+    fn notes_during<G>(&self, range: &G) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        with_pos!(self.iter_during(range))
+    }
+
+    fn notes_overlaps<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        with_pos!(self.iter_overlaps(range))
+    }
+
+    fn notes_start_during<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = ((), Range<Metric>, &Note<Self::Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        with_pos!(self.iter_starts_during(range))
+    }
+
+    fn notes_end_during<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = ((), Range<Metric>, &Note<Self::Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        with_pos!(self.iter_ends_during(range))
+    }
+
+    fn note_instants_during<'a, G>(
+        &'a self,
+        range: &G,
+    ) -> impl Iterator<Item = ((), NoteInstant<'a, Self::Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        instants_with_pos!(self.iter_endpoints_during(range))
     }
 }

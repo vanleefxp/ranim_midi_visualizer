@@ -20,9 +20,8 @@ use ranim::{
 use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 
 use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardConfig, PianoPedals};
-use simple_interval_tree::Endpoint;
 use typed_floats::tf64;
-use waveform_utils::music::{ControlContainer as _, NoteContainer as _, RawMusic};
+use waveform_utils::music::{ControlContainer as _, NoteContainer as _, NoteInstant, RawMusic};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -404,10 +403,10 @@ pub fn midi_visualizer_scene(
         let mut i_keyboard = i_keyboard_tem.clone();
         tl.play(i_keyboard.show()).forward(to_scene_time(0));
 
-        for (ep, [staff_idx, voice_idx]) in song.note_instants_with_pos() {
-            let Endpoint {
+        for ([staff_idx, voice_idx], ep) in song.note_instants() {
+            let NoteInstant {
                 is_end,
-                at: &time,
+                at: time,
                 pair: (_, note),
             } = ep;
 
@@ -437,9 +436,7 @@ pub fn midi_visualizer_scene(
     });
 
     // note animations
-    for ((range, note), [staff_idx, voice_idx]) in song.notes_by_start_with_pos() {
-        let &Range { start, end } = range;
-
+    for ([staff_idx, voice_idx], Range { start, end }, note) in song.notes_by_start() {
         let t_start = to_seconds(start) + f64::from(buf_time[0]);
         let duration = to_seconds(end - start);
 

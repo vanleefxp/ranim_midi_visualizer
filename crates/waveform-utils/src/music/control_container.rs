@@ -1,13 +1,47 @@
-use std::ops::RangeBounds;
+use std::{alloc::Allocator, ops::RangeBounds};
+
+use simple_interval_tree::MultiValueBTreeMap;
 
 use super::Metric;
 
-pub trait ControlContainer<'a, Control: 'a> {
-    fn controls_during<G>(&'a self, range: &G) -> impl Iterator<Item = (Metric, &'a Control)>
-    where
-        G: RangeBounds<Metric> + Clone;
+pub trait ControlContainer {
+    type Control;
+    type Pos = ();
 
-    fn controls(&'a self) -> impl Iterator<Item = (Metric, &'a Control)> {
+    fn controls_during_with_pos<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
+    where
+        G: RangeBounds<Metric>;
+
+    fn controls_with_pos(&self) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)> {
+        self.controls_during_with_pos(&..)
+    }
+
+    fn controls_during<G>(&self, range: &G) -> impl Iterator<Item = (Metric, &Self::Control)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        self.controls_during_with_pos(range).map(|(_, k, v)| (k, v))
+    }
+
+    fn controls(&self) -> impl Iterator<Item = (Metric, &Self::Control)> {
         self.controls_during(&..)
+    }
+}
+
+impl<Control, A: Allocator + Clone> ControlContainer for MultiValueBTreeMap<Metric, Control, A> {
+    type Control = Control;
+
+    fn controls_during_with_pos<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        self.range((range.start_bound(), range.end_bound()))
+            .map(|(&k, v)| ((), k, v))
     }
 }

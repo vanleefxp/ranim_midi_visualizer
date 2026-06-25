@@ -4,7 +4,9 @@
     fn_traits,
     decl_macro,
     mapped_lock_guards,
-    range_into_bounds
+    range_into_bounds,
+    allocator_api,
+    associated_type_defaults
 )]
 pub mod envelope;
 pub mod freq;

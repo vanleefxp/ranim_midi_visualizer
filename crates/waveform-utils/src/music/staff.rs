@@ -1,28 +1,26 @@
 use std::{
-    collections::BTreeMap,
     num::NonZeroU64,
     ops::{Range, RangeBounds},
 };
 
 use itertools::Itertools as _;
-use simple_interval_tree::Endpoint;
-use smallvec::SmallVec;
+use simple_interval_tree::MultiValueBTreeMap;
 
-use crate::music::{ControlContainer, NoteContainer, TimeMap};
+use crate::music::{ControlContainer, NoteContainer, NoteInstant, TimeMap};
 
 use super::{Metric, Note, PedalControl, Voice};
 
 #[derive(Debug, Clone)]
 pub struct Staff<Pitch = i8, Control = PedalControl> {
     pub voices: Vec<Voice<Pitch>>,
-    pub(crate) controls: BTreeMap<Metric, SmallVec<[Control; 1]>>,
+    pub(crate) controls: MultiValueBTreeMap<Metric, Control>,
 }
 
 impl<Pitch, Control> Default for Staff<Pitch, Control> {
     fn default() -> Self {
         Self {
             voices: Vec::new(),
-            controls: BTreeMap::new(),
+            controls: MultiValueBTreeMap::new(),
         }
     }
 }
@@ -44,147 +42,98 @@ impl<Pitch, Control> Staff<Pitch, Control> {
             .collect();
         Self { voices, controls }
     }
-
-    pub fn notes_by_start_with_pos(
-        &self,
-    ) -> impl Iterator<Item = (&(Range<Metric>, Note<Pitch>), usize)> {
-        self.voices
-            .iter()
-            .enumerate()
-            .map(|(idx, voice)| voice.notes_by_start().map(move |v| (v, idx)))
-            .kmerge_by(|((range1, _), _), ((range2, _), _)| range1.start < range2.start)
-    }
-
-    pub fn note_instants_during_with_pos<'a, G>(
-        &'a self,
-        range: &G,
-    ) -> impl Iterator<Item = (Endpoint<'a, Metric, Note<Pitch>>, usize)>
-    where
-        G: RangeBounds<Metric> + Clone,
-    {
-        self.voices
-            .iter()
-            .enumerate()
-            .map(|(idx, voice)| voice.note_instants_during(range).map(move |v| (v, idx)))
-            .kmerge_by(|(ep1, _), (ep2, _)| ep1.at < ep2.at)
-    }
-
-    pub fn note_instants_with_pos<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (Endpoint<'a, Metric, Note<Pitch>>, usize)> {
-        self.note_instants_during_with_pos(&..)
-    }
-
-    pub fn notes_during_with_pos<G>(
-        &self,
-        range: &G,
-    ) -> impl Iterator<Item = (&(Range<Metric>, Note<Pitch>), usize)>
-    where
-        G: RangeBounds<Metric> + Clone,
-    {
-        self.voices
-            .iter()
-            .enumerate()
-            .map(|(idx, voice)| voice.notes_during(range).map(move |v| (v, idx)))
-            .kmerge_by(|((range1, _), _), ((range2, _), _)| range1.start < range2.start)
-    }
-
-    pub fn notes_overlaps_with_pos<G>(
-        &self,
-        range: &G,
-    ) -> impl Iterator<Item = (&(Range<Metric>, Note<Pitch>), usize)>
-    where
-        G: RangeBounds<Metric> + Clone,
-    {
-        self.voices
-            .iter()
-            .enumerate()
-            .map(|(idx, voice)| voice.notes_overlaps(range).map(move |v| (v, idx)))
-            .kmerge_by(|((range1, _), _), ((range2, _), _)| range1.start < range2.start)
-    }
-
-    pub fn controls_during_with_pos<G>(
-        &self,
-        range: &G,
-    ) -> impl Iterator<Item = ((Metric, &Control), usize)>
-    where
-        G: RangeBounds<Metric> + Clone,
-    {
-        self.controls
-            .range(range.clone())
-            .enumerate()
-            .flat_map(|(idx, (&beat, controls))| controls.iter().map(move |v| ((beat, v), idx)))
-    }
-
-    pub fn controls_with_pos(&self) -> impl Iterator<Item = ((Metric, &Control), usize)> {
-        self.controls_during_with_pos(&..)
-    }
 }
 
-impl<'a, Pitch: 'a, Control> NoteContainer<'a, Pitch> for Staff<Pitch, Control> {
-    fn note_instants_during<G>(
+macro with_pos($voices:expr,$cl:expr) {
+    $voices
+        .iter()
+        .enumerate()
+        .map(|(idx, voice)| $cl(voice).map(move |(_, range, note)| (idx, range, note)))
+        .kmerge_by(|(_, range1, _), (_, range2, _)| range1.start < range2.start)
+}
+
+impl<Pitch, Control> NoteContainer for Staff<Pitch, Control> {
+    type Pitch = Pitch;
+    type Pos = usize;
+
+    fn notes_by_start<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &'a Note<Self::Pitch>)> {
+        with_pos!(self.voices, |voice: &'a Voice<Self::Pitch>| voice
+            .notes_by_start())
+    }
+
+    fn note_instants_during<'a, G>(
         &'a self,
         range: &G,
-    ) -> impl Iterator<Item = Endpoint<'a, Metric, Note<Pitch>>>
+    ) -> impl Iterator<Item = (Self::Pos, NoteInstant<'a, Self::Pitch>)>
     where
         G: RangeBounds<Metric>,
     {
         self.voices
             .iter()
-            .map(|voice| voice.note_instants_during(range))
-            .kmerge_by(|ep1, ep2| ep1.at < ep2.at)
+            .enumerate()
+            .map(|(idx, voice)| {
+                voice
+                    .note_instants_during(range)
+                    .map(move |(_, v)| (idx, v))
+            })
+            .kmerge_by(|(_, ep1), (_, ep2)| ep1.at < ep2.at)
     }
 
-    fn notes_by_start(&self) -> impl Iterator<Item = &(Range<Metric>, Note<Pitch>)> {
+    fn notes_during<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = (usize, Range<Metric>, &Note<Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
         self.voices
             .iter()
-            .map(|voice| voice.notes_by_start())
-            .kmerge_by(|(range1, _), (range2, _)| range1.start < range2.start)
+            .enumerate()
+            .map(|(idx, voice)| {
+                voice
+                    .notes_during(range)
+                    .map(move |(_, range, note)| (idx, range, note))
+            })
+            .kmerge_by(|(_, range1, _), (_, range2, _)| range1.start < range2.start)
+    }
+
+    fn notes_overlaps<'a, G>(
+        &'a self,
+        range: &G,
+    ) -> impl Iterator<Item = (usize, Range<Metric>, &'a Note<Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        with_pos!(self.voices, |voice: &'a Voice<Self::Pitch>| voice
+            .notes_overlaps(range))
+    }
+
+    fn notes_start_during<'a, G>(
+        &'a self,
+        range: &G,
+    ) -> impl Iterator<Item = (usize, Range<Metric>, &'a Note<Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        with_pos!(self.voices, |voice: &'a Voice<Self::Pitch>| voice
+            .notes_start_during(range))
+    }
+
+    fn notes_end_during<'a, G>(
+        &'a self,
+        range: &G,
+    ) -> impl Iterator<Item = (usize, Range<Metric>, &'a Note<Pitch>)>
+    where
+        G: RangeBounds<Metric>,
+    {
+        with_pos!(self.voices, |voice: &'a Voice<Self::Pitch>| voice
+            .notes_end_during(range))
     }
 
     fn note_count(&self) -> usize {
         self.voices.iter().map(|voice| voice.note_count()).sum()
-    }
-
-    fn notes_during<G>(&self, range: &G) -> impl Iterator<Item = &(Range<Metric>, Note<Pitch>)>
-    where
-        G: RangeBounds<Metric>,
-    {
-        self.voices
-            .iter()
-            .flat_map(|voice| voice.notes_during(range))
-    }
-
-    fn notes_overlaps<G>(&self, range: &G) -> impl Iterator<Item = &(Range<Metric>, Note<Pitch>)>
-    where
-        G: RangeBounds<Metric>,
-    {
-        self.voices
-            .iter()
-            .flat_map(|voice| voice.notes_overlaps(range))
-    }
-
-    fn notes_starts_during<G>(
-        &self,
-        range: &G,
-    ) -> impl Iterator<Item = &(Range<Metric>, Note<Pitch>)>
-    where
-        G: RangeBounds<Metric>,
-    {
-        self.voices
-            .iter()
-            .map(|voice| voice.notes_starts_during(range))
-            .kmerge_by(|(range1, _), (range2, _)| range1.start < range2.start)
-    }
-
-    fn notes_ends_during<G>(&self, range: &G) -> impl Iterator<Item = &(Range<Metric>, Note<Pitch>)>
-    where
-        G: RangeBounds<Metric>,
-    {
-        self.voices
-            .iter()
-            .map(|voice| voice.notes_ends_during(range))
-            .kmerge_by(|(range1, _), (range2, _)| range1.start < range2.start)
     }
 
     fn note_rate(&self, time: u64, window: NonZeroU64) -> usize {
@@ -200,13 +149,16 @@ impl<'a, Pitch: 'a, Control> NoteContainer<'a, Pitch> for Staff<Pitch, Control> 
     }
 }
 
-impl<'a, Pitch, Control: 'a> ControlContainer<'a, Control> for Staff<Pitch, Control> {
-    fn controls_during<G>(&self, range: &G) -> impl Iterator<Item = (Metric, &Control)>
+impl<Pitch, Control> ControlContainer for Staff<Pitch, Control> {
+    type Control = Control;
+
+    fn controls_during_with_pos<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
     where
-        G: RangeBounds<Metric> + Clone,
+        G: RangeBounds<Metric>,
     {
-        self.controls
-            .range(range.clone())
-            .flat_map(|(&beat, controls)| controls.iter().map(move |v| (beat, v)))
+        self.controls.controls_during_with_pos(range)
     }
 }

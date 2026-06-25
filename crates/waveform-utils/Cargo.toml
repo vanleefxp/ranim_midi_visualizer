@@ -18,6 +18,8 @@ simple-interval-tree = { workspace = true }
 ranim-midi-visualizer_math = { workspace = true }
 itertools = { workspace = true }
 tracing = { workspace = true }
+thiserror = { workspace = true }
+paste = { workspace = true }
 
 [dev-dependencies]
 tracing-test = { workspace = true }

@@ -1,13 +1,14 @@
-#![feature(allocator_api, associated_type_defaults)]
+#![feature(allocator_api, associated_type_defaults, btreemap_alloc)]
 
+pub mod multi_value_map;
 pub(crate) mod range;
-use range::{BoundExt as _, RangeBoundsExt as _};
+pub use multi_value_map::*;
+pub use range::*;
 
 use itertools::Itertools;
 use smallvec::SmallVec;
 use std::{
     alloc::{Allocator, Global},
-    cell::UnsafeCell,
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     marker::PhantomData,
@@ -38,60 +39,54 @@ impl<'a, R, V> From<EndpointRaw<'a, R, V>> for Endpoint<'a, R, V> {
     }
 }
 
-pub struct IntervalTree<R, V, A: Allocator = Global> {
-    starts: BTreeMap<R, SmallVec<[NodePtr<R, V>; 1]>>,
-    ends: BTreeMap<R, SmallVec<[NodePtr<R, V>; 1]>>,
-    len: UnsafeCell<usize>,
+pub struct IntervalTree<R, V, A: Allocator + Clone = Global> {
+    starts: BTreeMap<R, SmallVec<[NodePtr<R, V>; 1]>, A>,
+    ends: BTreeMap<R, SmallVec<[NodePtr<R, V>; 1]>, A>,
+    len: usize,
     alloc: A,
 }
 
-unsafe impl<R: Send, V: Send, A: Allocator + Send> Send for IntervalTree<R, V, A> {}
-unsafe impl<R: Sync, V: Sync, A: Allocator + Sync> Sync for IntervalTree<R, V, A> {}
+unsafe impl<R: Send, V: Send, A: Allocator + Clone + Send> Send for IntervalTree<R, V, A> {}
+unsafe impl<R: Sync, V: Sync, A: Allocator + Clone + Sync> Sync for IntervalTree<R, V, A> {}
 
 impl<R: Clone + Ord, V: Clone, A: Allocator + Clone> Clone for IntervalTree<R, V, A> {
     fn clone(&self) -> Self {
         let mut ptrs = HashMap::with_capacity(self.len());
 
-        let alloc = self.alloc.clone();
-        let starts = self
-            .starts
-            .iter()
-            .map(|(range, nodes)| {
-                let nodes = nodes
-                    .iter()
-                    .map(|&ptr| {
-                        let pair = unsafe { &*(ptr.as_ptr()) }.clone();
-                        let new_ptr =
-                            Box::into_non_null_with_allocator(Box::new_in(pair, &alloc)).0;
-                        ptrs.insert(ptr, new_ptr);
-                        new_ptr
-                    })
-                    .collect();
-                (range.clone(), nodes)
-            })
-            .collect();
-        let ends = self
-            .ends
-            .iter()
-            .map(|(range, nodes)| {
-                let nodes = nodes
-                    .iter()
-                    .map(|ptr| ptrs.get(ptr).copied().unwrap())
-                    .collect();
-                (range.clone(), nodes)
-            })
-            .collect();
+        let mut starts = BTreeMap::new_in(self.alloc.clone());
+        starts.extend(self.starts.iter().map(|(range, nodes)| {
+            let nodes = nodes
+                .iter()
+                .map(|&ptr| {
+                    let pair = unsafe { &*(ptr.as_ptr()) }.clone();
+                    let new_ptr =
+                        Box::into_non_null_with_allocator(Box::new_in(pair, &self.alloc)).0;
+                    ptrs.insert(ptr, new_ptr);
+                    new_ptr
+                })
+                .collect();
+            (range.clone(), nodes)
+        }));
+
+        let mut ends = BTreeMap::new_in(self.alloc.clone());
+        ends.extend(self.ends.iter().map(|(range, nodes)| {
+            let nodes = nodes
+                .iter()
+                .map(|ptr| ptrs.get(ptr).copied().unwrap())
+                .collect();
+            (range.clone(), nodes)
+        }));
 
         Self {
             starts,
             ends,
-            len: UnsafeCell::new(unsafe { *(self.len.get()) }),
-            alloc,
+            len: self.len,
+            alloc: self.alloc.clone(),
         }
     }
 }
 
-impl<R, V, A: Allocator> Drop for IntervalTree<R, V, A> {
+impl<R, V, A: Allocator + Clone> Drop for IntervalTree<R, V, A> {
     fn drop(&mut self) {
         self.clear();
     }
@@ -99,7 +94,7 @@ impl<R, V, A: Allocator> Drop for IntervalTree<R, V, A> {
 
 /// Type representing an entry in the interval tree.
 #[allow(unused)]
-pub struct Entry<'a, R, V, A: Allocator = Global> {
+pub struct Entry<'a, R, V, A: Allocator + Clone = Global> {
     /// Which tree the entry is from. Used for verification before deletion.
     /// Deleting an entry from the wrong tree will cause the program to panic.
     tree: *const IntervalTree<R, V, A>,
@@ -108,7 +103,7 @@ pub struct Entry<'a, R, V, A: Allocator = Global> {
     _marker: PhantomData<&'a (Range<R>, V)>,
 }
 
-impl<R, V, A: Allocator> Deref for Entry<'_, R, V, A> {
+impl<R, V, A: Allocator + Clone> Deref for Entry<'_, R, V, A> {
     type Target = (Range<R>, V);
 
     fn deref(&self) -> &Self::Target {
@@ -119,13 +114,13 @@ impl<R, V, A: Allocator> Deref for Entry<'_, R, V, A> {
 
 impl<R, V, A> IntervalTree<R, V, A>
 where
-    A: Allocator,
+    A: Allocator + Clone,
 {
     pub fn new_in(alloc: A) -> Self {
         IntervalTree {
-            starts: BTreeMap::new(),
-            ends: BTreeMap::new(),
-            len: UnsafeCell::default(),
+            starts: BTreeMap::new_in(alloc.clone()),
+            ends: BTreeMap::new_in(alloc.clone()),
+            len: 0,
             alloc,
         }
     }
@@ -157,7 +152,7 @@ where
 impl<R, V, A> Extend<(Range<R>, V)> for IntervalTree<R, V, A>
 where
     R: Ord + Clone,
-    A: Allocator,
+    A: Allocator + Clone,
 {
     fn extend<T: IntoIterator<Item = (Range<R>, V)>>(&mut self, iter: T) {
         for (range, value) in iter {
@@ -173,33 +168,53 @@ unsafe fn nodes_to_tuples<'a, R: 'a, V: 'a>(
     nodes.map(|v| unsafe { &*(v.as_ptr()) })
 }
 
+#[inline(always)]
+unsafe fn nodes_to_ref_tuples<'a, R: 'a, V: 'a>(
+    nodes: impl Iterator<Item = NodePtr<R, V>>,
+) -> impl Iterator<Item = (&'a Range<R>, &'a V)> {
+    unsafe { nodes_to_tuples(nodes).map(|(a, b)| (a, b)) }
+}
+
+#[inline(always)]
+unsafe fn nodes_to_tuples_double_ended<'a, R: 'a, V: 'a>(
+    nodes: impl DoubleEndedIterator<Item = NodePtr<R, V>>,
+) -> impl DoubleEndedIterator<Item = &'a (Range<R>, V)> {
+    nodes.map(|v| unsafe { &*(v.as_ptr()) })
+}
+
+#[inline(always)]
+unsafe fn nodes_to_ref_tuples_double_ended<'a, R: 'a, V: 'a>(
+    nodes: impl DoubleEndedIterator<Item = NodePtr<R, V>>,
+) -> impl DoubleEndedIterator<Item = (&'a Range<R>, &'a V)> {
+    unsafe { nodes_to_tuples_double_ended(nodes).map(|(a, b)| (a, b)) }
+}
+
 impl<R, V, A> IntervalTree<R, V, A>
 where
-    A: Allocator,
+    A: Allocator + Clone,
 {
     pub fn is_empty(&self) -> bool {
         self.starts.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        // SAFETY: readonly access.
-        unsafe { *(self.len.get()) }
+        self.len
     }
 
     pub fn clear(&mut self) {
-        let starts = mem::take(&mut self.starts);
+        let starts = mem::replace(&mut self.starts, BTreeMap::new_in(self.alloc.clone()));
         starts.values().flatten().for_each(|&v| unsafe {
             let _ = Box::from_non_null_in(v, &self.alloc);
         });
         self.ends.clear();
-        *self.len.get_mut() = 0;
+        self.len = 0;
     }
 }
 
 impl<R, V, A> IntervalTree<R, V, A>
 where
     R: Ord,
-    A: Allocator,
+    A: Allocator + Clone,
 {
     pub fn insert(&mut self, range: Range<R>, value: V)
     where
@@ -209,7 +224,7 @@ where
         let node = Box::into_non_null_with_allocator(Box::new_in((range, value), &self.alloc)).0;
         self.starts.entry(start).or_default().push(node);
         self.ends.entry(end).or_default().push(node);
-        *self.len.get_mut() += 1;
+        self.len += 1;
     }
 
     pub fn retain(&mut self, mut f: impl FnMut(&Range<R>, &mut V) -> bool) {
@@ -222,7 +237,8 @@ where
                     true
                 } else {
                     removed.insert(*v);
-                    *self.len.get_mut() -= 1;
+                    self.len -= 1;
+                    // SAFETY: all pointers are extracted from boxes when created.
                     let _ = unsafe { Box::from_non_null_in(*v, &self.alloc) };
                     false
                 }
@@ -250,7 +266,7 @@ where
         {
             start_nodes.retain(|v| *v != node);
             end_nodes.retain(|v| *v != node);
-            *self.len.get_mut() -= 1;
+            self.len -= 1;
             (start_nodes.is_empty(), end_nodes.is_empty())
         } else {
             unreachable!()
@@ -275,17 +291,16 @@ where
         }
     }
 
-    fn nodes_by_start(&self) -> impl Iterator<Item = NodePtr<R, V>> {
+    fn nodes_by_start(&self) -> impl DoubleEndedIterator<Item = NodePtr<R, V>> {
         self.starts.values().flat_map(|v| v.iter().copied())
     }
 
-    fn nodes_by_end(&self) -> impl Iterator<Item = NodePtr<R, V>> {
+    fn nodes_by_end(&self) -> impl DoubleEndedIterator<Item = NodePtr<R, V>> {
         self.ends.values().flat_map(|v| v.iter().copied())
     }
 
     fn nodes_overlaps<G>(&self, range: &G) -> impl Iterator<Item = NodePtr<R, V>>
     where
-        R: Clone,
         G: RangeBounds<R>,
     {
         // start < range.end && end > range.start
@@ -303,7 +318,6 @@ where
 
     fn nodes_during<G>(&self, range: &G) -> impl Iterator<Item = NodePtr<R, V>>
     where
-        R: Clone,
         G: RangeBounds<R>,
     {
         // start >= range.start && end <= range.end
@@ -317,7 +331,7 @@ where
             })
     }
 
-    fn nodes_starts_during<G>(&self, range: &G) -> impl Iterator<Item = NodePtr<R, V>>
+    fn nodes_starts_during<G>(&self, range: &G) -> impl DoubleEndedIterator<Item = NodePtr<R, V>>
     where
         G: RangeBounds<R>,
     {
@@ -326,7 +340,7 @@ where
             .flat_map(|(_, v)| v.iter().copied())
     }
 
-    fn nodes_ends_during<G>(&self, range: &G) -> impl Iterator<Item = NodePtr<R, V>>
+    fn nodes_ends_during<G>(&self, range: &G) -> impl DoubleEndedIterator<Item = NodePtr<R, V>>
     where
         G: RangeBounds<R>,
     {
@@ -419,17 +433,17 @@ where
     // }
 
     /// Returns an iterator over all entries in the tree, ordered by interval starts.
-    pub fn iter_by_start(&self) -> impl Iterator<Item = &(Range<R>, V)> {
+    pub fn iter_by_start(&self) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
-        unsafe { nodes_to_tuples(self.nodes_by_start()) }
+        unsafe { nodes_to_ref_tuples_double_ended(self.nodes_by_start()) }
     }
 
-    pub fn into_iter_by_start(mut self) -> impl Iterator<Item = (Range<R>, V)>
+    pub fn into_iter_by_start(mut self) -> impl DoubleEndedIterator<Item = (Range<R>, V)>
     where
         A: 'static + Clone,
     {
         let alloc = self.alloc.clone();
-        let starts = mem::take(&mut self.starts);
+        let starts = mem::replace(&mut self.starts, BTreeMap::new_in(self.alloc.clone()));
         mem::forget(self);
 
         starts
@@ -443,17 +457,17 @@ where
     }
 
     /// Returns an iterator over all entries in the tree, ordered by interval ends.
-    pub fn iter_by_end(&self) -> impl Iterator<Item = &(Range<R>, V)> {
+    pub fn iter_by_end(&self) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
-        unsafe { nodes_to_tuples(self.nodes_by_end()) }
+        unsafe { nodes_to_ref_tuples_double_ended(self.nodes_by_end()) }
     }
 
-    pub fn into_iter_by_end(mut self) -> impl Iterator<Item = (Range<R>, V)>
+    pub fn into_iter_by_end(mut self) -> impl DoubleEndedIterator<Item = (Range<R>, V)>
     where
         A: 'static + Clone,
     {
         let alloc = self.alloc.clone();
-        let ends = mem::take(&mut self.ends);
+        let ends = mem::replace(&mut self.ends, BTreeMap::new_in(self.alloc.clone()));
         mem::forget(self);
 
         ends.into_values()
@@ -465,40 +479,38 @@ where
             })
     }
 
-    pub fn iter_overlaps<G>(&self, range: &G) -> impl Iterator<Item = &(Range<R>, V)>
+    pub fn iter_overlaps<G>(&self, range: &G) -> impl Iterator<Item = (&Range<R>, &V)>
     where
-        R: Clone,
         G: RangeBounds<R>,
     {
         // SAFETY: all pointers should point to valid nodes.
-        unsafe { nodes_to_tuples(self.nodes_overlaps(range)) }
+        unsafe { nodes_to_ref_tuples(self.nodes_overlaps(range)) }
     }
 
-    pub fn iter_during<G>(&self, range: &G) -> impl Iterator<Item = &(Range<R>, V)>
+    pub fn iter_during<G>(&self, range: &G) -> impl Iterator<Item = (&Range<R>, &V)>
     where
-        R: Clone,
         G: RangeBounds<R>,
     {
         // SAFETY: all pointers should point to valid nodes.
-        unsafe { nodes_to_tuples(self.nodes_during(range)) }
+        unsafe { nodes_to_ref_tuples(self.nodes_during(range)) }
     }
 
     /// Returns an iterator over entries whose starting point is within the given range.
     pub fn iter_starts_during<G: RangeBounds<R>>(
         &self,
         range: &G,
-    ) -> impl Iterator<Item = &(Range<R>, V)> {
+    ) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
-        unsafe { nodes_to_tuples(self.nodes_starts_during(range)) }
+        unsafe { nodes_to_ref_tuples_double_ended(self.nodes_starts_during(range)) }
     }
 
     /// Returns an iterator over entries whose ending point is within the given range.
     pub fn iter_ends_during<G: RangeBounds<R>>(
         &self,
         range: &G,
-    ) -> impl Iterator<Item = &(Range<R>, V)> {
+    ) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
-        unsafe { nodes_to_tuples(self.nodes_ends_during(range)) }
+        unsafe { nodes_to_ref_tuples_double_ended(self.nodes_ends_during(range)) }
     }
 }
 
@@ -506,14 +518,10 @@ impl<R, V, A> Debug for IntervalTree<R, V, A>
 where
     R: Debug + Ord,
     V: Debug,
-    A: Allocator,
+    A: Allocator + Clone,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut ds = f.debug_struct("IntervalTree");
-        for (range, value) in self.iter_by_start() {
-            ds.field(format!("{:?}", range).as_str(), value);
-        }
-        ds.finish()
+        f.debug_map().entries(self.iter_by_start()).finish()
     }
 }
 
@@ -744,5 +752,24 @@ mod tests {
         tree.clear();
         debug!("{:?}", tree);
         assert_eq!(tree.len(), 0);
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_clone() {
+        let tree = build_example_tree();
+        let mut cloned_tree = tree.clone();
+        debug!("Before clear");
+        debug!("{:?}", tree);
+        debug!("{:?}", cloned_tree);
+        assert_eq!(tree.len(), cloned_tree.len());
+        let tree_len = tree.len();
+
+        debug!("After clear");
+        cloned_tree.clear();
+        debug!("{:?}", tree);
+        debug!("{:?}", cloned_tree);
+        assert_eq!(tree.len(), tree_len);
+        assert_eq!(cloned_tree.len(), 0);
     }
 }
