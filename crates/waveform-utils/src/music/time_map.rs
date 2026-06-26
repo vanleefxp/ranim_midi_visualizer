@@ -1,17 +1,24 @@
-use std::{iter, num::NonZero, ops::Range};
+use std::{
+    iter,
+    num::NonZero,
+    ops::{Deref, Range},
+};
 
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
+use tracing::{debug, info};
 
-use crate::music::{Metric, NoteContainer, NoteInstant, Tempo};
+use crate::music::{ControlContainer, Metric, NoteContainer, NoteInstant, Tempo};
 
 pub type TimeMap = SegmentedLinearFn<Metric, Metric>;
 
-pub struct MappedNoteContainer<'a, Container>
-where
-    Container: NoteContainer,
-{
+pub struct MappedNoteContainer<'a, Container, TimeMapRef: Deref<Target = TimeMap> + 'a> {
     pub(crate) orig: &'a Container,
-    pub(crate) time_map: &'a TimeMap,
+    pub(crate) time_map: TimeMapRef,
+}
+
+pub struct MappedControlContainer<'a, Container, TimeMapRef: Deref<Target = TimeMap> + 'a> {
+    pub(crate) orig: &'a Container,
+    pub(crate) time_map: TimeMapRef,
 }
 
 macro to_mapped($iter:expr,$time_map:expr) {
@@ -23,7 +30,9 @@ macro to_mapped($iter:expr,$time_map:expr) {
     })
 }
 
-impl<Container: NoteContainer> NoteContainer for MappedNoteContainer<'_, Container> {
+impl<Container: NoteContainer, T: Deref<Target = TimeMap>> NoteContainer
+    for MappedNoteContainer<'_, Container, T>
+{
     type Pitch = Container::Pitch;
     type Pos = Container::Pos;
 
@@ -128,6 +137,28 @@ impl<Container: NoteContainer> NoteContainer for MappedNoteContainer<'_, Contain
     }
 }
 
+impl<Container: ControlContainer, T: Deref<Target = TimeMap>> ControlContainer
+    for MappedControlContainer<'_, Container, T>
+{
+    type Control = Container::Control;
+    type Pos = Container::Pos;
+
+    fn controls_during<G>(
+        &self,
+        range: &G,
+    ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
+    where
+        G: std::ops::RangeBounds<Metric>,
+    {
+        self.orig
+            .controls_during(range)
+            .map(|(pos, time, control)| {
+                let time = self.time_map.eval(&time, true);
+                (pos, time, control)
+            })
+    }
+}
+
 pub(crate) fn generate_time_map(
     tempo: &LadderFn<Metric, Tempo>,
     tick_duration: Metric,            // duration of the song in ticks
@@ -148,7 +179,7 @@ pub(crate) fn generate_time_map(
         .map(|(_, &v)| v)
         .unwrap_or(default_tempo);
 
-    for (tick, time_units_per_beat) in tempo
+    for (tick, tempo) in tempo
         .iter()
         .map(|(&k, &v)| (k, v))
         .chain(iter::once((tick_duration, last_tempo)))
@@ -158,13 +189,22 @@ pub(crate) fn generate_time_map(
         let dt = (cur_tempo.get() as f64 * n_beats) as u64;
         cur_time_units += dt;
         cur_tick = tick;
+        debug!(
+            "Tempo change: {} -> {} time units per beat",
+            cur_tempo, tempo
+        );
+        debug!(
+            "Inserted point at tick {}, time unit {}",
+            cur_tick, cur_time_units
+        );
         if time_to_beat {
             time_map.insert(cur_time_units, cur_tick);
         } else {
             time_map.insert(cur_tick, cur_time_units);
         }
-        cur_tempo = time_units_per_beat;
+        cur_tempo = tempo;
     }
+    info!("Time map generated.");
 
     time_map
 }

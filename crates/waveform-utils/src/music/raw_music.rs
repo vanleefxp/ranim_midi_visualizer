@@ -138,10 +138,7 @@ impl<Pitch, Control> ControlContainer for RawMusic<Pitch, Control> {
     type Control = Control;
     type Pos = usize;
 
-    fn controls_during_with_pos<G>(
-        &self,
-        range: &G,
-    ) -> impl Iterator<Item = (usize, Metric, &Control)>
+    fn controls_during<G>(&self, range: &G) -> impl Iterator<Item = (usize, Metric, &Control)>
     where
         G: RangeBounds<Metric>,
     {
@@ -151,7 +148,7 @@ impl<Pitch, Control> ControlContainer for RawMusic<Pitch, Control> {
             .map(|(staff_idx, staff)| {
                 staff
                     .controls_during(range)
-                    .map(move |(time, control)| (staff_idx, time, control))
+                    .map(move |(_, time, control)| (staff_idx, time, control))
             })
             .kmerge_by(|(_, time1, _), (_, time2, _)| time1 < time2)
     }

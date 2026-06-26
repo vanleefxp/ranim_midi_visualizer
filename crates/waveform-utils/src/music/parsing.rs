@@ -183,11 +183,11 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
             let event = event.inspect_err(|err| error!("{:?}", err))?;
             debug!("{:?}", event);
 
-            // advance time
-            // let dt = (event.delta.as_int() as u128 * time_units_per_beat.get() as u128
-            //     / beat_resolution.get() as u128) as u64;
-            // cur_time += dt;
-            cur_tick += event.delta.as_int() as u64;
+            // advance tick
+            let delta_tick = event.delta.as_int() as u64;
+            cur_tick = cur_tick
+                .checked_add(delta_tick)
+                .ok_or(ParseMidiError::TimeOverflow(cur_tick, delta_tick))?;
 
             use midly::TrackEventKind::*;
             match event.kind {
@@ -198,6 +198,7 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
                     use midly::MidiMessage::*;
                     let voice = voice.as_int();
                     match message {
+                        // Start of note
                         NoteOn {
                             key: pitch,
                             vel: velocity,
@@ -216,6 +217,10 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
                                 .or_default()
                                 .push((cur_tick, note));
                         }
+                        // End of note
+                        // Sometimes expressed as a `NoteOn` event with velocity 0.
+                        // Sometimes expressed as a `NoteOff` event with the same velocity as a previous `NoteOn` event.
+                        // Both cases are handled here.
                         NoteOn { key: pitch, .. } | NoteOff { key: pitch, .. } => {
                             // regularize pitch to middle C as 0
                             let pitch = pitch.as_int() as i8 - 60;
@@ -263,14 +268,15 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
                 Meta(message) => {
                     use midly::MetaMessage::*;
                     match message {
-                        Tempo(tempo) => {
-                            time_units_per_beat = ((tempo.as_int() as f64
+                        Tempo(microsecs_per_beat) => {
+                            time_units_per_beat = ((microsecs_per_beat.as_int() as f64
                                 * (time_resolution.get() as f64 / 1e6))
                                 as u64)
                                 .try_into()
                                 .expect("Tempo should be strictly positive.");
                             music.tempo.insert(cur_tick, time_units_per_beat);
                         }
+                        // `EndOfTrack` determines the duration of the track
                         EndOfTrack => {
                             music.inner.duration = music.duration.max(cur_tick);
                         }
@@ -289,10 +295,15 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
+    use tracing::info;
     use tracing_test::traced_test;
 
     use super::super::{ControlContainer as _, NoteContainer as _};
     use super::*;
+
+    const DURATION_TOL: u64 = 1000000; // 1000000 nanoseconds = 1 millisecond
 
     #[traced_test]
     #[test]
@@ -305,26 +316,88 @@ mod tests {
         println!("{:?}", music);
     }
 
+    macro test_parse_midi($name:literal) {
+        let src = include_bytes!($name).as_slice();
+
+        let music_raw = parse_midi_raw(src).unwrap();
+        let music = parse_midi(src).unwrap();
+        assert!(music_raw.notes_by_start().next().is_some());
+        assert!(music_raw.controls().next().is_some());
+        assert!(music.notes_by_start().next().is_some());
+        assert!(music.controls().next().is_some());
+
+        let duration_raw = music_raw.duration;
+        let duration = music.duration();
+        let duration_diff = duration.abs_diff(duration_raw);
+
+        // an insignificant difference might be noticed
+        debug!("Duration using `RawMusic`: {}", duration_raw);
+        debug!("Duration using `Music`: {}", duration);
+        debug!("Duration difference: {}", duration_diff);
+        assert!(duration_diff < DURATION_TOL); // 1000000 nanoseconds = 1 millisecond
+
+        // Checking if all notes match
+        for ((pos1, range1, note1), (pos2, range2, note2)) in music_raw
+            .notes_by_start()
+            .zip(music.as_mapped().notes_by_start())
+        {
+            assert_eq!(pos1, pos2);
+            assert_eq!(note1, note2);
+
+            debug!(
+                "Note {:?} at {:?}. Time range of note using `RawMusic`: {:?}",
+                note1, pos1, range1
+            );
+            debug!(
+                "Note {:?} at {:?}. Time range of note using `Music`: {:?}",
+                note2, pos2, range2
+            );
+
+            let Range {
+                start: start1,
+                end: end1,
+            } = range1;
+            let Range {
+                start: start2,
+                end: end2,
+            } = range2;
+            let start_diff = start1.abs_diff(start2);
+            let end_diff = end1.abs_diff(end2);
+
+            debug!("Time difference: start {}, end {}", start_diff, end_diff);
+
+            assert!(start_diff < DURATION_TOL);
+            assert!(end_diff < DURATION_TOL);
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_time_map_cache() {
+        let src = include_bytes!("tests/song_2.mid").as_slice();
+        let music = parse_midi(src).unwrap();
+
+        // dead lock should not happen
+
+        info!("Accessing time map for the first time.");
+        let _ = music.time_map();
+        info!("Access completed.");
+
+        info!("Accessing time map for the second time.");
+        let _ = music.time_map();
+        info!("Access completed.");
+    }
+
     #[traced_test]
     #[test]
     fn test_parse_midi_complicated_1() {
-        let src = include_bytes!("tests/song_2.mid").as_slice();
-        let music = parse_midi_raw(src);
-        assert!(music.is_ok());
-        let music = music.unwrap();
-        assert!(music.notes_by_start().next().is_some());
-        assert!(music.controls().next().is_some());
+        test_parse_midi!("tests/song_2.mid");
     }
 
     #[traced_test]
     #[test]
     fn test_parse_midi_complicated_2() {
-        let src = include_bytes!("tests/the-egg-of-our-hearts.mid").as_slice();
-        let music = parse_midi_raw(src);
-        assert!(music.is_ok());
-        let music = music.unwrap();
-        assert!(music.notes_by_start().next().is_some());
-        assert!(music.controls().next().is_some());
+        test_parse_midi!("tests/the-egg-of-our-hearts.mid");
     }
 
     #[traced_test]

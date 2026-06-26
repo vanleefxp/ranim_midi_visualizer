@@ -8,25 +8,14 @@ pub trait ControlContainer {
     type Control;
     type Pos = ();
 
-    fn controls_during_with_pos<G>(
+    fn controls_during<G>(
         &self,
         range: &G,
     ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
     where
         G: RangeBounds<Metric>;
 
-    fn controls_with_pos(&self) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)> {
-        self.controls_during_with_pos(&..)
-    }
-
-    fn controls_during<G>(&self, range: &G) -> impl Iterator<Item = (Metric, &Self::Control)>
-    where
-        G: RangeBounds<Metric>,
-    {
-        self.controls_during_with_pos(range).map(|(_, k, v)| (k, v))
-    }
-
-    fn controls(&self) -> impl Iterator<Item = (Metric, &Self::Control)> {
+    fn controls(&self) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)> {
         self.controls_during(&..)
     }
 }
@@ -34,7 +23,7 @@ pub trait ControlContainer {
 impl<Control, A: Allocator + Clone> ControlContainer for MultiValueBTreeMap<Metric, Control, A> {
     type Control = Control;
 
-    fn controls_during_with_pos<G>(
+    fn controls_during<G>(
         &self,
         range: &G,
     ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>

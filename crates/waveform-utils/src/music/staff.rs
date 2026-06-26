@@ -152,13 +152,13 @@ impl<Pitch, Control> NoteContainer for Staff<Pitch, Control> {
 impl<Pitch, Control> ControlContainer for Staff<Pitch, Control> {
     type Control = Control;
 
-    fn controls_during_with_pos<G>(
+    fn controls_during<G>(
         &self,
         range: &G,
     ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
     where
         G: RangeBounds<Metric>,
     {
-        self.controls.controls_during_with_pos(range)
+        self.controls.controls_during(range)
     }
 }

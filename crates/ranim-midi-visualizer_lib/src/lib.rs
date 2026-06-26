@@ -472,7 +472,7 @@ pub fn midi_visualizer_scene(
         let mut i_pedals = i_pedals_tem.clone();
         tl.play(i_pedals.show()).forward(to_scene_time(0));
 
-        for (time, control) in song.controls() {
+        for (_, time, control) in song.controls() {
             let pedal_type = Pedal::try_from(control.pedal as u8).expect("should be successful");
             tl.forward_to(to_scene_time(time)).play(i_pedals.hide());
             i_pedals = i_pedals.with(|item| {
