@@ -16,7 +16,7 @@ use ranim::{cmd::preview::Resolution, glam::DVec2};
 use ranim_midi_visualizer_lib::ColorBy;
 use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 use std::{collections::HashMap, f32::consts::PI as PI_f32, ops::Range};
-use waveform_utils::music::{Note, NoteContainer as _, RawMusic};
+use waveform_utils::music::{Music, Note, NoteContainer as _};
 
 fn points_on_circ(
     center: egui::Pos2,
@@ -140,7 +140,7 @@ pub struct DataCache {
 #[allow(unused)]
 pub struct MidiVisualizerPreview<'a> {
     /// the displaying MIDI music
-    music: &'a RawMusic,
+    music: &'a Music,
     /// configuration of the MIDI visualizer
     pub visualizer_config: &'a MidiVisualizerConfig,
     /// configuration of the Ranim scene
@@ -155,7 +155,7 @@ pub struct MidiVisualizerPreview<'a> {
 
 impl<'a> MidiVisualizerPreview<'a> {
     pub fn new(
-        music: &'a RawMusic,
+        music: &'a Music,
         visualizer_config: &'a MidiVisualizerConfig,
         clear_color: egui::Color32,
         resolution: Resolution,
@@ -173,7 +173,10 @@ impl<'a> MidiVisualizerPreview<'a> {
 
 impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let total_time = self.music.duration;
+        let total_time = self.music.duration();
+        let mapped_music = self
+                        .music
+                        .as_mapped();
 
         let available_size = ui.available_size();
         let aspect_ratio = self.resolution.ratio();
@@ -271,11 +274,11 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     );
                 };
                 let note_rate_to_nps = |note_rate: usize| {
-                    note_rate as f64 * self.music.resolution.get() as f64 / window.get() as f64
+                    note_rate as f64 * self.music.time_resolution.get() as f64 / window.get() as f64
                 };
 
                 let note_count = self.cache.note_count.unwrap_or_else(|| {
-                    self.music
+                    mapped_music
                         .note_count_iter()
                         .take_while(|&(time, _)| time <= self.time)
                         .last()
@@ -283,7 +286,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                         .unwrap_or(0)
                 });
                 let note_count_total = self.cache.note_count_total.unwrap_or_else(|| {
-                    self.music
+                    mapped_music
                         .note_count_iter()
                         .last()
                         .map(|v| v.1)
@@ -292,9 +295,9 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let note_rate = self
                     .cache
                     .note_rate
-                    .unwrap_or_else(|| self.music.note_rate(self.time, window));
+                    .unwrap_or_else(|| self.music.as_mapped().note_rate(self.time, window));
                 let note_rate_max = self.cache.note_rate_max.unwrap_or_else(|| {
-                    self.music
+                    mapped_music
                         .note_rate_iter(window)
                         .take_while(|&(time, _)| time <= self.time)
                         .map(|(_, nps)| nps)
@@ -306,7 +309,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let legato_index = self
                     .cache
                     .legato_index
-                    .unwrap_or_else(|| self.music.legato_index(self.time, window));
+                    .unwrap_or_else(|| mapped_music.legato_index(self.time, window));
 
                 create_text(
                     format!("TIME {}", nano_to_time_string(self.time)).as_str(),
@@ -360,7 +363,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let highlighted_keys: HashMap<_, _> = {
                     let time_range = self.time..=self.time;
                     let notes_on =
-                        self.music
+                        mapped_music
                             .notes_overlaps(time_range)
                             .filter_map(|(pos, _, note)| {
                                 if key_range.contains(&note.pitch) {
@@ -611,8 +614,8 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     let ranim_scroll_height = (egui_scroll_height / unit) as f64;
                     let scroll_time = (ranim_scroll_height / scroll_speed * 1e9) as u64;
                     let time_range = self.time..(scroll_time + self.time);
-                    let visible_notes = self
-                        .music
+
+                    let visible_notes = mapped_music
                         .notes_overlaps(time_range)
                         .filter(|(_, _, note)| key_range.contains(&note.pitch));
                     let notes_clip_rect = egui::Rect::from_min_size(
@@ -624,7 +627,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
 
                     let time_to_y = |time: u64| {
                         let y_diff = (time.abs_diff(self.time) as f64
-                            / self.music.resolution.get() as f64)
+                            / self.music.time_resolution.get() as f64)
                             as f32
                             * egui_scroll_speed;
                         let y_diff = if time < self.time { y_diff } else { -y_diff };

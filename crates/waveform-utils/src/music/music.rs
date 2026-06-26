@@ -1,6 +1,5 @@
 use std::{
     num::NonZero,
-    ops::{Deref, DerefMut, Range},
     sync::{MappedRwLockReadGuard, RwLock, RwLockReadGuard},
 };
 
@@ -8,9 +7,11 @@ use derivative::Derivative;
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use tracing::info;
 
+use crate::music::MappedNoteControlContainer;
+
 use super::{
-    ControlContainer, DEFAULT_BEAT_RESOLUTION, MappedControlContainer, MappedNoteContainer, Metric,
-    MetricRange, NoteContainer, RawMusic, Tempo, TimeMap, control::PedalControl,
+    DEFAULT_BEAT_RESOLUTION, MappedControlContainer, MappedNoteContainer, Metric,
+    RawMusic, Tempo, control::PedalControl,
     time_map::generate_time_map,
 };
 
@@ -31,91 +32,6 @@ pub struct Music<Pitch = i8, Control = PedalControl> {
     /// A mapping from metric beats to time in seconds.
     #[derivative(Debug = "ignore")]
     pub(crate) time_map: RwLock<Option<SegmentedLinearFn<Metric, Metric>>>,
-}
-
-pub struct MappedMusic<'a, Pitch, Control, TimeMapRef: Deref<Target = TimeMap> + 'a> {
-    pub notes: MappedNoteContainer<'a, RawMusic<Pitch, Control>, TimeMapRef>,
-    pub controls: MappedControlContainer<'a, RawMusic<Pitch, Control>, TimeMapRef>,
-}
-
-impl<Pitch, Control, TimeMapRef: Deref<Target = TimeMap>> NoteContainer
-    for MappedMusic<'_, Pitch, Control, TimeMapRef>
-{
-    type Pitch = Pitch;
-    type Pos = [usize; 2];
-
-    fn notes_by_start(
-        &self,
-    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)> {
-        self.notes.notes_by_start()
-    }
-
-    fn notes_during<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
-    where
-        R: MetricRange,
-    {
-        self.notes.notes_during(range)
-    }
-
-    fn notes_overlaps<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
-    where
-        R: MetricRange,
-    {
-        self.notes.notes_overlaps(range)
-    }
-
-    fn notes_start_during<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
-    where
-        R: MetricRange,
-    {
-        self.notes.notes_start_during(range)
-    }
-
-    fn notes_end_during<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
-    where
-        R: MetricRange,
-    {
-        self.notes.notes_end_during(range)
-    }
-
-    fn note_instants_during<'a, R>(
-        &'a self,
-        range: R,
-    ) -> impl Iterator<Item = (Self::Pos, super::NoteInstant<'a, Self::Pitch>)>
-    where
-        R: MetricRange,
-    {
-        self.notes.note_instants_during(range)
-    }
-}
-
-impl<'a, Pitch, Control, TimeMapRef: Deref<Target = TimeMap> + 'a> ControlContainer
-    for MappedMusic<'a, Pitch, Control, TimeMapRef>
-{
-    type Control = Control;
-    type Pos = usize;
-
-    fn controls_during<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
-    where
-        R: MetricRange,
-    {
-        self.controls.controls_during(range)
-    }
 }
 
 impl<Pitch, Control> Clone for Music<Pitch, Control>
@@ -140,21 +56,20 @@ impl<Pitch, Control> Default for Music<Pitch, Control> {
     }
 }
 
-impl<Pitch, Control> Deref for Music<Pitch, Control> {
-    type Target = RawMusic<Pitch, Control>;
-
-    fn deref(&self) -> &Self::Target {
+impl<Pitch, Control> AsRef<RawMusic<Pitch, Control>> for Music<Pitch, Control> {
+    fn as_ref(&self) -> &RawMusic<Pitch, Control> {
         &self.inner
     }
 }
 
-impl<Pitch, Control> DerefMut for Music<Pitch, Control> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+impl<Pitch, Control> AsMut<RawMusic<Pitch, Control>> for Music<Pitch, Control> {
+    fn as_mut(&mut self) -> &mut RawMusic<Pitch, Control> {
         &mut self.inner
     }
 }
 
-type TimeMapRef<'a> = MappedRwLockReadGuard<'a, SegmentedLinearFn<Metric, Metric>>;
+pub type TimeMapRef<'a> = MappedRwLockReadGuard<'a, SegmentedLinearFn<Metric, Metric>>;
+pub type MappedMusic<'a, Pitch, Control, TimeMapRef> = MappedNoteControlContainer<'a, RawMusic<Pitch, Control>, TimeMapRef>;
 
 impl<Pitch, Control> Music<Pitch, Control> {
     pub fn from_beat_resolution(beat_resolution: NonZero<Metric>) -> Self {
@@ -190,7 +105,7 @@ impl<Pitch, Control> Music<Pitch, Control> {
                 *write_guard = Some(generate_time_map(
                     &self.tempo,
                     self.inner.duration,
-                    self.resolution,
+                    self.inner.resolution,
                     self.time_resolution,
                     false,
                 ));

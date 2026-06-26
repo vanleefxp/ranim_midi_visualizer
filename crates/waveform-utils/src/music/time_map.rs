@@ -183,3 +183,88 @@ pub(crate) fn generate_time_map(
 
     time_map
 }
+
+pub struct MappedNoteControlContainer<'a, Container: NoteContainer + ControlContainer, TimeMapRef: Deref<Target = TimeMap> + 'a> {
+    pub notes: MappedNoteContainer<'a, Container, TimeMapRef>,
+    pub controls: MappedControlContainer<'a, Container, TimeMapRef>,
+}
+
+impl<Container: NoteContainer + ControlContainer, TimeMapRef: Deref<Target = TimeMap>> NoteContainer
+    for MappedNoteControlContainer<'_, Container, TimeMapRef>
+{
+    type Pitch = Container::Pitch;
+    type Pos = <Container as NoteContainer>::Pos;
+
+    fn notes_by_start(
+        &self,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)> {
+        self.notes.notes_by_start()
+    }
+
+    fn notes_during<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
+    where
+        R: MetricRange,
+    {
+        self.notes.notes_during(range)
+    }
+
+    fn notes_overlaps<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
+    where
+        R: MetricRange,
+    {
+        self.notes.notes_overlaps(range)
+    }
+
+    fn notes_start_during<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
+    where
+        R: MetricRange,
+    {
+        self.notes.notes_start_during(range)
+    }
+
+    fn notes_end_during<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
+    where
+        R: MetricRange,
+    {
+        self.notes.notes_end_during(range)
+    }
+
+    fn note_instants_during<'a, R>(
+        &'a self,
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, super::NoteInstant<'a, Self::Pitch>)>
+    where
+        R: MetricRange,
+    {
+        self.notes.note_instants_during(range)
+    }
+}
+
+impl<'a, Container: NoteContainer + ControlContainer, TimeMapRef: Deref<Target = TimeMap> + 'a> ControlContainer
+    for MappedNoteControlContainer<'a, Container, TimeMapRef>
+{
+    type Control = Container::Control;
+    type Pos = <Container as ControlContainer>::Pos;
+
+    fn controls_during<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
+    where
+        R: MetricRange,
+    {
+        self.controls.controls_during(range)
+    }
+}

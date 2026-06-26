@@ -21,7 +21,7 @@ use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 
 use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardConfig, PianoPedals};
 use typed_floats::tf64;
-use waveform_utils::music::{ControlContainer as _, NoteContainer as _, NoteInstant, RawMusic};
+use waveform_utils::music::{ControlContainer as _, Music, NoteContainer as _, NoteInstant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -127,14 +127,14 @@ pub struct MidiVisualizerConfig {
 
 pub fn midi_visualizer_scene(
     r: &mut RanimScene,
-    song: &RawMusic,
+    song: &Music,
     config: &MidiVisualizerConfig,
     resolution: Resolution,
 ) {
     let cam = CameraFrame::default();
     r.insert(cam.clone());
 
-    let time_resolution = song.resolution;
+    let time_resolution = song.time_resolution;
     let &MidiVisualizerConfig {
         scroll_speed,
         color_by,
@@ -229,7 +229,7 @@ pub fn midi_visualizer_scene(
     let scroll_height =
         tf64::PositiveFinite::try_from(frame_height - i_keyboard_tem.aabb_size().y).unwrap();
     let scroll_time = scroll_height / scroll_speed;
-    let duration = song.duration as f64 / time_resolution.get() as f64;
+    let duration = song.duration() as f64 / time_resolution.get() as f64;
 
     let to_seconds = |time: u64| time as f64 / time_resolution.get() as f64;
     let to_scene_time =
@@ -308,7 +308,7 @@ pub fn midi_visualizer_scene(
     //
     r.insert_with(|tl| {
         let origin = text_origin(4, 1);
-        let note_count_total = song.note_count();
+        let note_count_total = song.as_ref().note_count();
         let create_note_count_text = |n: usize| {
             let src = format!("NOTE COUNT {n} / {note_count_total}");
             TextItem::new(src, font_size)
@@ -320,6 +320,7 @@ pub fn midi_visualizer_scene(
         tl.play(i_note_count.show());
 
         for (time, note_count) in song
+            .as_mapped()
             .note_count_iter()
             .map(|(time, note_count)| (to_scene_time(time), note_count))
         {
@@ -347,7 +348,7 @@ pub fn midi_visualizer_scene(
         let mut note_rate_max = 0;
         let mut i_nps_text = create_nps_text(0, 0);
         tl.play(i_nps_text.show());
-        for (time, nps) in song
+        for (time, nps) in song.as_mapped()
             .note_rate_iter(time_window)
             .map(|(time, nps)| (to_scene_time(time), nps))
         {
@@ -360,7 +361,7 @@ pub fn midi_visualizer_scene(
 
     // Legato Index
     r.insert_with(|tl| {
-        let legato_score_fn = song.legato_fn(time_window);
+        let legato_score_fn = song.as_mapped().legato_fn(time_window);
         let origin = text_origin(4, 3);
 
         // font and font size are config variables
@@ -403,7 +404,7 @@ pub fn midi_visualizer_scene(
         let mut i_keyboard = i_keyboard_tem.clone();
         tl.play(i_keyboard.show()).forward(to_scene_time(0));
 
-        for ([staff_idx, voice_idx], ep) in song.note_instants() {
+        for ([staff_idx, voice_idx], ep) in song.as_mapped().note_instants() {
             let NoteInstant {
                 is_end,
                 at: time,
@@ -436,7 +437,7 @@ pub fn midi_visualizer_scene(
     });
 
     // note animations
-    for ([staff_idx, voice_idx], Range { start, end }, note) in song.notes_by_start() {
+    for ([staff_idx, voice_idx], Range { start, end }, note) in song.as_mapped().notes_by_start() {
         let t_start = to_seconds(start) + f64::from(buf_time[0]);
         let duration = to_seconds(end - start);
 
@@ -472,7 +473,7 @@ pub fn midi_visualizer_scene(
         let mut i_pedals = i_pedals_tem.clone();
         tl.play(i_pedals.show()).forward(to_scene_time(0));
 
-        for (_, time, control) in song.controls() {
+        for (_, time, control) in song.as_mapped().controls() {
             let pedal_type = Pedal::try_from(control.pedal as u8).expect("should be successful");
             tl.forward_to(to_scene_time(time)).play(i_pedals.hide());
             i_pedals = i_pedals.with(|item| {
@@ -484,7 +485,7 @@ pub fn midi_visualizer_scene(
 }
 
 pub fn render_midi_visualizer(
-    song: &RawMusic,
+    song: &Music,
     name: &str,
     visualizer_config: &MidiVisualizerConfig,
     scene_config: &SceneConfig,

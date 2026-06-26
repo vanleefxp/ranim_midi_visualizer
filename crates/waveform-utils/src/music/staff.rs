@@ -3,7 +3,7 @@ use std::{num::NonZeroU64, ops::Range};
 use itertools::Itertools as _;
 use simple_interval_tree::MultiValueBTreeMap;
 
-use crate::music::{ControlContainer, NoteContainer, NoteInstant, TimeMap};
+use crate::music::{ControlContainer, MappedNoteControlContainer, NoteContainer, NoteInstant, TimeMap};
 
 use super::{Metric, MetricRange, Note, PedalControl, Voice};
 
@@ -159,3 +159,5 @@ impl<Pitch, Control> ControlContainer for Staff<Pitch, Control> {
         self.controls.controls_during(range)
     }
 }
+
+pub type MappedStaff<'a, Pitch, Control, TimeMapRef> = MappedNoteControlContainer<'a, Staff<Pitch, Control>, TimeMapRef>;

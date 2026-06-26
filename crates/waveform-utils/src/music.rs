@@ -21,10 +21,10 @@ pub use staff::*;
 pub use time_map::*;
 pub use voice::*;
 
-use std::{num::NonZeroU64, ops::RangeBounds};
+use std::{num::NonZero, ops::RangeBounds};
 use typed_floats::tf64;
 
 pub type Metric = u64;
 pub type Velocity = tf64::PositiveFinite;
-pub type Tempo = NonZeroU64;
+pub type Tempo = NonZero<Metric>;
 pub trait MetricRange = RangeBounds<Metric> + Clone;

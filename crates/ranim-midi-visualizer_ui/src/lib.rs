@@ -34,8 +34,7 @@ use std::{
 use tracing::{error, info};
 use typed_floats::tf64;
 use waveform_utils::{
-    music::{Note, NoteContainer as _, RawMusic},
-    synth::{MusicDirective, NoteDirective, Synth},
+    music::{Music, Note, NoteContainer as _}, synth::{MusicDirective, NoteDirective, Synth},
 };
 
 #[allow(unused)]
@@ -75,7 +74,7 @@ pub(crate) struct MidiVisualizerAppInner2 {
     pub(crate) notes_on: HashMap<i8, tf64::PositiveFinite>,
 
     /// the displaying MIDI music
-    pub(crate) music: Arc<RawMusic>,
+    pub(crate) music: Arc<Music>,
     /// soundfont for playing MIDI notes
 
     /// configuration of the MIDI visualizer
@@ -464,19 +463,19 @@ impl MidiVisualizerAppInner {
                             let new_time = ((Instant::now() - start_t).as_nanos() as f64
                                 * self.playback_speed)
                                 as u64;
-                            if new_time > self.music.duration {
+                            if new_time > self.music.duration() {
                                 if self.looping {
                                     // restarts from beginning
-                                    self.inner.time = new_time % self.music.duration;
+                                    self.inner.time = new_time % self.music.duration();
                                 } else {
                                     // pauses at final state
-                                    self.inner.time = self.music.duration;
+                                    self.inner.time = self.music.duration();
                                     self.inner.play_start_t = None;
                                 }
                                 synth.directive(MusicDirective::Stop);
                             } else {
                                 let time_range = self.inner.time..new_time;
-                                for (_, instant) in self.music.note_instants_during(time_range) {
+                                for (_, instant) in self.music.as_mapped().note_instants_during(time_range) {
                                     let &Note { pitch, velocity } = instant.pair.1;
                                     if instant.is_end {
                                         synth.directive(NoteDirective::new_off(pitch).into());
@@ -570,10 +569,13 @@ impl MidiVisualizerAppInner {
                 {
                     ui.style_mut().spacing.slider_width = ui.available_width();
                     let slider =
-                        egui::Slider::new(&mut self.inner.time, 0..=self.inner.music.duration)
+                        egui::Slider::new(&mut self.inner.time, 0..=self.inner.music.duration())
                             .show_value(false)
                             .handle_shape(egui::style::HandleShape::Circle);
-                    let resp = ui.add_enabled(self.inner.music.duration > 0, slider);
+                    let resp = ui.add_enabled(self.inner.music.duration() > 0, slider);
+                    if resp.drag_started() {
+                        self.synth.lock().unwrap().directive(MusicDirective::Stop);
+                    }
                     if resp.changed() && self.is_playing() {
                         self.play();
                     }

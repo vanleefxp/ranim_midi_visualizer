@@ -15,7 +15,7 @@ use uncased::{AsUncased, UncasedStr};
 use ranim_midi_visualizer_lib::{
     ColorBy, MidiVisualizerConfig, ProgressBarConfig, midi_visualizer_scene, render_midi_visualizer,
 };
-use waveform_utils::music::{RawMusic, parse_midi_raw};
+use waveform_utils::music::{Music, parse_midi};
 
 static VIDEO_SIZES: phf::Map<&UncasedStr, Resolution> = phf_map! {
     UncasedStr::new("8k") | UncasedStr::new("4320p") => Resolution::new(7680, 4320),
@@ -155,7 +155,7 @@ fn get_visualizer_config(matches: &ArgMatches) -> Result<MidiVisualizerConfig> {
     Ok(visualizer_config)
 }
 
-fn get_song_and_name(matches: &ArgMatches) -> Result<(RawMusic, String)> {
+fn get_song_and_name(matches: &ArgMatches) -> Result<(Music, String)> {
     let midi_path = PathBuf::from(
         matches
             .get_one::<String>("midi_file")
@@ -163,7 +163,7 @@ fn get_song_and_name(matches: &ArgMatches) -> Result<(RawMusic, String)> {
             .ok_or_else(|| anyhow!("invalid input"))?,
     );
     let src = std::fs::read(&midi_path)?;
-    let music = parse_midi_raw(&src)?;
+    let music = parse_midi(&src)?;
     let name = midi_path
         .file_stem()
         .map(|v| v.to_string_lossy().to_string())

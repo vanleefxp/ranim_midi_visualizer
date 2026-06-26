@@ -278,7 +278,7 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
                         }
                         // `EndOfTrack` determines the duration of the track
                         EndOfTrack => {
-                            music.inner.duration = music.duration.max(cur_tick);
+                            music.inner.duration = music.inner.duration.max(cur_tick);
                         }
                         _ => (),
                     }
@@ -287,7 +287,7 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
             }
         }
 
-        music.staves.push(staff);
+        music.inner.staves.push(staff);
     }
 
     Ok(music)
@@ -323,8 +323,8 @@ mod tests {
         let music = parse_midi(src).unwrap();
         assert!(music_raw.notes_by_start().next().is_some());
         assert!(music_raw.controls().next().is_some());
-        assert!(music.notes_by_start().next().is_some());
-        assert!(music.controls().next().is_some());
+        assert!(music.inner.notes_by_start().next().is_some());
+        assert!(music.inner.controls().next().is_some());
 
         let duration_raw = music_raw.duration;
         let duration = music.duration();
