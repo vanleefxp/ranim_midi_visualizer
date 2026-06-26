@@ -1,7 +1,5 @@
 use std::{
-    iter,
-    num::NonZero,
-    ops::{Deref, Range},
+    iter, num::NonZero, ops::{Deref, Range},
 };
 
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
@@ -125,6 +123,7 @@ impl<Container: ControlContainer, T: Deref<Target = TimeMap>> ControlContainer
     where
         R: MetricRange,
     {
+        let range = self.time_map.x_range(range, true);
         self.orig
             .controls_during(range)
             .map(|(pos, time, control)| {

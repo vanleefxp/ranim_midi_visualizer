@@ -6,14 +6,40 @@ use std::{
 
 use cpal::{FromSample, Sample, SizedSample};
 use derivative::Derivative;
+use flagset::{flags, FlagSet};
 
 use super::Synth;
 use crate::{
-    envelope::{Envelope, ExpDecay},
-    freq::ToFrequency,
-    synth::{MusicDirective, NoteDirective},
-    waveform::{Triangle, Waveform},
+    envelope::{Envelope, ExpDecay}, freq::ToFrequency, music::Pedal, synth::{MusicDirective, NoteDirective}, waveform::{Triangle, Waveform},
 };
+
+flags! {
+    pub enum PedalState: u8 {
+        Soft,
+        Sostenuto,
+        Sustain,
+    }
+}
+
+impl From<Pedal> for PedalState {
+    fn from(value: Pedal) -> Self {
+        match value {
+            Pedal::Soft => PedalState::Soft,
+            Pedal::Sostenuto => PedalState::Sostenuto,
+            Pedal::Sustain => PedalState::Sustain,
+        }
+    }
+}
+
+impl From<PedalState> for Pedal {
+    fn from(value: PedalState) -> Self {
+        match value {
+            PedalState::Soft => Pedal::Soft,
+            PedalState::Sostenuto => Pedal::Sostenuto,
+            PedalState::Sustain => Pedal::Sustain,
+        }
+    }
+}
 
 #[derive(Clone)]
 struct NoteState {
@@ -42,12 +68,11 @@ pub struct SimpleWaveformSynth<Note = i8> {
     pub note_max_volume: f64,
     /// Currently sounding notes.
     note_states: HashMap<Note, NoteState>,
+    pressed_notes: HashSet<Note>,
     sustain_notes: HashSet<Note>,
-    sostenuto_notes: HashSet<Note>,
     /// Time (in seconds) since the first note of the currently sounding notes has been triggered.
     paused: bool,
-    sustain_on: bool,
-    sostenuto_on: bool,
+    pedal_state: FlagSet<PedalState>,
     time: f64,
 }
 
@@ -57,9 +82,10 @@ where
 {
     /// Trigger a note with the given volume.
     pub fn attack(&mut self, note: Note, volume: f64) {
-        if self.sustain_on {
+        if self.pedal_state.contains(PedalState::Sustain) {
             self.sustain_notes.insert(note.clone());
         }
+        self.pressed_notes.insert(note.clone());
         self.note_states.insert(
             note,
             NoteState {
@@ -75,6 +101,7 @@ where
     /// Release a note. Different from [`Synthesizer::stop`], the note may still last for a while and gradually fade
     /// out.
     pub fn release(&mut self, note: &Note) {
+        self.pressed_notes.remove(note);
         if !(self.sustain_notes.contains(note))
             && let Some(note_state) = self.note_states.get_mut(note)
             && note_state.is_on
@@ -107,6 +134,60 @@ where
     fn play(&mut self) {
         self.paused = false;
     }
+
+    fn track_sustained_notes(&mut self) {
+        self.sustain_notes.extend(
+            self.note_states
+                .iter()
+                .filter_map(|(note, state)| if state.is_on { Some(note) } else { None })
+                .cloned(),
+        );
+    }
+
+    fn stop_sustained_notes(&mut self) {
+        for note in self.sustain_notes.drain() {
+            if let Some(note_state) = self.note_states.get_mut(&note) && note_state.is_on && !self.pressed_notes.contains(&note) {
+                note_state.is_on = false;
+                note_state.trigger_time = self.time;
+            }
+        }
+    }
+
+    pub fn start_sustain(&mut self)
+    where
+        Note: Clone + Hash + Eq,
+    {
+        self.track_sustained_notes();
+        self.pedal_state |= PedalState::Sustain;
+    }
+
+    pub fn stop_sustain(&mut self)
+    where
+        Note: Hash + Eq,
+    {
+        if (self.pedal_state & PedalState::Sostenuto).is_empty() {
+            self.stop_sustained_notes();
+        }
+        self.pedal_state &= !PedalState::Sustain;
+    }
+
+    pub fn start_sostenuto(&mut self)
+    where
+        Note: Clone + Hash + Eq,
+    {
+        self.track_sustained_notes();
+        self.pedal_state |= PedalState::Sostenuto;
+    }
+
+    pub fn stop_sostenuto(&mut self)
+    where
+        Note: Hash + Eq,
+    {
+        if (self.pedal_state & PedalState::Sustain).is_empty() {
+            self.stop_sustained_notes();
+        }
+        self.pedal_state &= !PedalState::Sostenuto;
+    }
 }
 
 impl<Note: ToFrequency> SimpleWaveformSynth<Note> {
@@ -132,64 +213,6 @@ impl<Note: ToFrequency> SimpleWaveformSynth<Note> {
     {
         self.note_states.keys()
     }
-
-    pub fn start_sustain(&mut self)
-    where
-        Note: Clone + Hash + Eq,
-    {
-        self.sustain_notes.extend(
-            self.note_states
-                .iter()
-                .filter_map(|(note, state)| if state.is_on { Some(note) } else { None })
-                .cloned(),
-        );
-        self.sustain_on = true;
-    }
-
-    pub fn stop_sustain(&mut self)
-    where
-        Note: Hash + Eq,
-    {
-        for note in self.sustain_notes.drain() {
-            if (!self.sostenuto_on || !self.sostenuto_notes.contains(&note))
-                && let Some(note_state) = self.note_states.get_mut(&note)
-                && note_state.is_on
-            {
-                note_state.is_on = false;
-                note_state.trigger_time = self.time;
-            }
-        }
-        self.sustain_on = false;
-    }
-
-    pub fn start_sostenuto(&mut self)
-    where
-        Note: Clone + Hash + Eq,
-    {
-        self.sustain_notes.extend(
-            self.note_states
-                .iter()
-                .filter_map(|(note, state)| if state.is_on { Some(note) } else { None })
-                .cloned(),
-        );
-        self.sostenuto_on = true;
-    }
-
-    pub fn stop_sostenuto(&mut self)
-    where
-        Note: Hash + Eq,
-    {
-        for note in self.sostenuto_notes.drain() {
-            if (!self.sostenuto_on || !self.sustain_notes.contains(&note))
-                && let Some(note_state) = self.note_states.get_mut(&note)
-                && note_state.is_on
-            {
-                note_state.is_on = false;
-                note_state.trigger_time = self.time;
-            }
-        }
-        self.sostenuto_on = false;
-    }
 }
 
 impl<Note, Sample> Synth<MusicDirective<Note>, Sample> for SimpleWaveformSynth<Note>
@@ -205,6 +228,23 @@ where
                     self.attack(pitch, volume.into());
                 } else {
                     self.release(&pitch);
+                }
+            },
+            Control(control) => {
+                use Pedal::*;
+                let is_on = control.depth > 0.;
+                match control.pedal {
+                    Sustain => if is_on {
+                        self.start_sustain();
+                    } else {
+                        self.stop_sustain();
+                    },
+                    Sostenuto => if is_on {
+                        self.start_sostenuto()
+                    } else {
+                        self.stop_sostenuto();
+                    },
+                    _ => (),
                 }
             }
             PlayPause(is_play) => {

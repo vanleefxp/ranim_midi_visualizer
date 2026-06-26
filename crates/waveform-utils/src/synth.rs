@@ -2,15 +2,15 @@ mod simple;
 
 use std::any::Any;
 
-use crate::freq::ToFrequency;
+use crate::{freq::ToFrequency, music::PedalControl};
 pub use simple::*;
 use typed_floats::tf64;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MusicDirective<Pitch: ToFrequency = i8> {
+pub enum MusicDirective<Pitch: ToFrequency = i8, Control = PedalControl> {
     Note(NoteDirective<Pitch>),
-    // Control(Controller),
+    Control(Control),
     PlayPause(bool),
     Stop,
 }
@@ -30,7 +30,7 @@ impl<Pitch: ToFrequency> NoteDirective<Pitch> {
     }
 }
 
-impl<Pitch: ToFrequency> From<NoteDirective<Pitch>> for MusicDirective<Pitch> {
+impl<Pitch: ToFrequency, Control> From<NoteDirective<Pitch>> for MusicDirective<Pitch, Control> {
     fn from(value: NoteDirective<Pitch>) -> Self {
         MusicDirective::Note(value)
     }

@@ -42,6 +42,8 @@ fn main() -> Result<()> {
         fn build_filter() -> EnvFilter {
             const DEFAULT_DIRECTIVES: &[(&str, LevelFilter)] = &[
                 ("ranim_midi_visualizer_lib", LevelFilter::INFO),
+                ("ranim_midi_visualizer_ui", LevelFilter::DEBUG),
+                ("waveform_utils", LevelFilter::ERROR),
                 ("ranim_midi_visualizer", LevelFilter::INFO),
                 ("ranim_cli", LevelFilter::INFO),
                 ("ranim", LevelFilter::INFO),

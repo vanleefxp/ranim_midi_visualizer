@@ -1,6 +1,6 @@
 use typed_floats::tf64;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Pedal {
     Soft = 0,
     Sostenuto = 1,
@@ -8,7 +8,7 @@ pub enum Pedal {
     Sustain = 2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, )]
 pub struct PedalControl {
     /// Which pedal is being controlled.
     pub pedal: Pedal,

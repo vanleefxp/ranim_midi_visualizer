@@ -31,10 +31,10 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use typed_floats::tf64;
 use waveform_utils::{
-    music::{Music, Note, NoteContainer as _}, synth::{MusicDirective, NoteDirective, Synth},
+    music::{ControlContainer as _, Music, Note, NoteContainer as _}, synth::{MusicDirective, NoteDirective, Synth},
 };
 
 #[allow(unused)]
@@ -475,8 +475,9 @@ impl MidiVisualizerAppInner {
                                 synth.directive(MusicDirective::Stop);
                             } else {
                                 let time_range = self.inner.time..new_time;
-                                for (_, instant) in self.music.as_mapped().note_instants_during(time_range) {
+                                for (_, instant) in self.music.as_mapped().note_instants_during(time_range.clone()) {
                                     let &Note { pitch, velocity } = instant.pair.1;
+                                    debug!("playing note: {pitch} with velocity {velocity}");
                                     if instant.is_end {
                                         synth.directive(NoteDirective::new_off(pitch).into());
                                     } else {
@@ -488,6 +489,10 @@ impl MidiVisualizerAppInner {
                                             .into(),
                                         );
                                     }
+                                }
+                                for (_, _, &control) in self.music.as_mapped().controls_during(time_range.clone()) {
+                                    debug!("playing control: {control:?}");
+                                    synth.directive(MusicDirective::Control(control));
                                 }
                                 self.inner.time = new_time;
                             }

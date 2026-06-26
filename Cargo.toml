@@ -89,6 +89,7 @@ thiserror = "2.0.18"
 tracing-test = "0.2.6"
 rand = "0.10.1"
 assert_float_eq = "1.2.0"
+flagset = "0.4.7"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
