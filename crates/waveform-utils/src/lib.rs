@@ -6,7 +6,8 @@
     mapped_lock_guards,
     range_into_bounds,
     allocator_api,
-    associated_type_defaults
+    associated_type_defaults,
+    trait_alias
 )]
 pub mod envelope;
 pub mod freq;

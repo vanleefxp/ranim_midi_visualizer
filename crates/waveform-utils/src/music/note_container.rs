@@ -2,13 +2,13 @@ use std::{
     alloc::Allocator,
     collections::BTreeMap,
     num::NonZeroU64,
-    ops::{Bound::*, IntoBounds as _, Range, RangeBounds},
+    ops::{Bound::*, IntoBounds as _, Range},
 };
 
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use simple_interval_tree::{Endpoint, IntervalTree};
 
-use super::{Metric, Note};
+use super::{Metric, MetricRange, Note};
 
 pub struct NoteInstant<'a, Pitch: 'a> {
     pub is_end: bool,
@@ -43,43 +43,43 @@ pub trait NoteContainer {
         &self,
     ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>;
 
-    fn notes_during<G>(
+    fn notes_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
-        G: RangeBounds<Metric>;
+        R: MetricRange;
 
-    fn notes_overlaps<G>(
+    fn notes_overlaps<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
-        G: RangeBounds<Metric>;
+        R: MetricRange;
 
-    fn notes_start_during<G>(
+    fn notes_start_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
-        G: RangeBounds<Metric>;
+        R: MetricRange;
 
-    fn notes_end_during<G>(
+    fn notes_end_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &Note<Self::Pitch>)>
     where
-        G: RangeBounds<Metric>;
+        R: MetricRange;
 
-    fn note_instants_during<'a, G>(
+    fn note_instants_during<'a, R>(
         &'a self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, NoteInstant<'a, Self::Pitch>)>
     where
-        G: RangeBounds<Metric>;
+        R: MetricRange;
 
     fn note_instants(&self) -> impl Iterator<Item = (Self::Pos, NoteInstant<'_, Self::Pitch>)> {
-        self.note_instants_during(&..)
+        self.note_instants_during(..)
     }
 
     fn note_count(&self) -> usize {
@@ -135,7 +135,7 @@ pub trait NoteContainer {
     /// Number of notes played in the time window.
     fn note_rate(&self, time: u64, window: NonZeroU64) -> usize {
         let time_range = time.saturating_sub(window.get())..time;
-        self.notes_start_during(&time_range).count()
+        self.notes_start_during(time_range).count()
     }
 
     /// **Legato index** is a measure describing how continuously a series of notes are played.
@@ -151,7 +151,7 @@ pub trait NoteContainer {
     fn legato_index(&self, time: u64, window: NonZeroU64) -> f64 {
         let time_range = time.saturating_sub(window.get())..time;
         let duration_sum: u64 = {
-            self.notes_overlaps(&time_range)
+            self.notes_overlaps(time_range.clone())
                 .map(|(_, range, _)| range.clone())
                 .map(|range| {
                     let (start, end) = time_range.clone().intersect(range);
@@ -249,49 +249,46 @@ impl<Pitch, A: Allocator + Clone> NoteContainer for IntervalTree<Metric, Note<Pi
         with_pos!(self.iter_by_start())
     }
 
-    fn notes_during<G>(&self, range: &G) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)>
+    fn notes_during<R>(&self, range: R) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)>
     where
-        G: RangeBounds<Metric>,
+        R: MetricRange,
     {
         with_pos!(self.iter_during(range))
     }
 
-    fn notes_overlaps<G>(
-        &self,
-        range: &G,
-    ) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)>
+    fn notes_overlaps<R>(&self, range: R) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)>
     where
-        G: RangeBounds<Metric>,
+        R: MetricRange,
     {
         with_pos!(self.iter_overlaps(range))
     }
 
-    fn notes_start_during<G>(
+    fn notes_start_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = ((), Range<Metric>, &Note<Self::Pitch>)>
     where
-        G: RangeBounds<Metric>,
+        R: MetricRange,
     {
         with_pos!(self.iter_starts_during(range))
     }
 
-    fn notes_end_during<G>(
+    fn notes_end_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = ((), Range<Metric>, &Note<Self::Pitch>)>
     where
-        G: RangeBounds<Metric>,
+        R: MetricRange,
     {
         with_pos!(self.iter_ends_during(range))
     }
 
-    fn note_instants_during<'a, G>(
+    fn note_instants_during<'a, R>(
         &'a self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = ((), NoteInstant<'a, Self::Pitch>)>
     where
-        G: RangeBounds<Metric>,
+        R: MetricRange,
     {
         instants_with_pos!(self.iter_endpoints_during(range))
     }

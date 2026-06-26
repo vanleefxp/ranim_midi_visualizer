@@ -1,109 +1,17 @@
 #![allow(non_camel_case_types)]
 
+use super::interpolate::{Interpolatable, InvertInterpolatable};
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use ordered_float::OrderedFloat;
 use std::{
     collections::BTreeMap,
     iter::Sum,
-    ops::{Add, AddAssign, Bound::*},
+    ops::{
+        Add, AddAssign,
+        Bound::{self, *},
+        RangeBounds,
+    },
 };
-use typed_floats::{tf32, tf64};
-
-type f32o = OrderedFloat<f32>;
-type f64o = OrderedFloat<f64>;
-
-/// A trait for interpolating to values
-///
-/// It uses the reference of two values and produce an owned interpolated value.
-pub trait Interpolatable {
-    /// Lerping between values
-    fn lerp(&self, target: &Self, t: f64) -> Self;
-}
-
-macro_rules! impl_interpolatable_for_int {
-    ($($t:ty),*) => {
-        $(
-            impl Interpolatable for $t {
-                fn lerp(&self, target: &Self, t: f64) -> Self {
-                    (*self as f64).lerp(&(*target as f64), t) as $t
-                }
-            }
-        )*
-    };
-}
-
-impl_interpolatable_for_int!(
-    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
-);
-
-impl Interpolatable for f32 {
-    fn lerp(&self, target: &Self, t: f64) -> Self {
-        self + (target - self) * t as f32
-    }
-}
-
-impl Interpolatable for f64 {
-    fn lerp(&self, target: &Self, t: f64) -> Self {
-        self + (target - self) * t
-    }
-}
-
-impl Interpolatable for f32o {
-    fn lerp(&self, target: &Self, t: f64) -> Self {
-        self + (target - self) * f32o::from(t as f32)
-    }
-}
-
-impl Interpolatable for f64o {
-    fn lerp(&self, target: &Self, t: f64) -> Self {
-        self + (target - self) * f64o::from(t)
-    }
-}
-
-/// Trait for types that can perform the inverse of interpolation. i.e. find the relative position of a value in the
-/// interpolation range.
-pub trait InvertInterpolatable {
-    /// Returns the relative position (parameter t) of `self` in the interpolation range `start..=end`.
-    /// This is the inverse operation of `lerp`.
-    fn t_value(&self, start: &Self, end: &Self) -> f64;
-}
-
-macro invert_interpolatable_impl($($t:ty),*$(,)?) {
-    $(
-        impl InvertInterpolatable for $t {
-            fn t_value(&self, start: &Self, end: &Self) -> f64 {
-                (*self as f64 - *start as f64) / (*end as f64 - *start as f64)
-            }
-        }
-    )*
-}
-
-invert_interpolatable_impl!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64, isize, usize);
-
-impl InvertInterpolatable for f32o {
-    fn t_value(&self, start: &Self, end: &Self) -> f64 {
-        (*self - *start).0 as f64 / (*end - *start).0 as f64
-    }
-}
-
-impl InvertInterpolatable for f64o {
-    fn t_value(&self, start: &Self, end: &Self) -> f64 {
-        (*self - *start).0 / (*end - *start).0
-    }
-}
-
-impl InvertInterpolatable for tf32::NonNaNFinite {
-    fn t_value(&self, start: &Self, end: &Self) -> f64 {
-        f32::from(*self - *start) as f64 / f32::from(*end - *start) as f64
-    }
-}
-
-impl InvertInterpolatable for tf64::NonNaNFinite {
-    fn t_value(&self, start: &Self, end: &Self) -> f64 {
-        f64::from(*self - *start) / f64::from(*end - *start)
-    }
-}
 
 /// Representation of a continuous segmented linear function.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, AsRef, AsMut, From, Into)]
@@ -168,16 +76,44 @@ impl<X, Y> SegmentedLinearFn<X, Y> {
         }
     }
 
+    /// Evaluate the sigmented linear function for a range bound.
+    /// The result is the function value at the point with the same inclusiveness of the original range.
+    fn eval_bound(&self, x_bound: Bound<&X>, extrapolate: bool) -> Bound<Y>
+    where
+        X: EvalX,
+        Y: EvalY,
+    {
+        match x_bound {
+            Unbounded => Unbounded,
+            Included(x) => Included(self.eval(x, extrapolate)),
+            Excluded(x) => Excluded(self.eval(x, extrapolate)),
+        }
+    }
+
+    /// Find the range of $y$ corresponding to that of $x$.
+    /// This works only for strictly increasing functions (which is invertible).
+    /// If not, the result is undefined.
+    pub fn y_range(&self, x_range: impl RangeBounds<X>, extrapolate: bool) -> (Bound<Y>, Bound<Y>)
+    where
+        X: EvalX,
+        Y: EvalY,
+    {
+        (
+            self.eval_bound(x_range.start_bound(), extrapolate),
+            self.eval_bound(x_range.end_bound(), extrapolate),
+        )
+    }
+
     /// Evaluate the inverse function of the segmented linear function at a given point $y$.
-    /// This requires the current function to be strictly increasing.
+    /// This requires the current function to be strictly increasing (which makes it invertible).
     /// If not, the result is undefined.
     ///
     /// The time complexity is $O(\log^2 n)$ due to the use of binary search in finding the range where $x$ is located
     /// in.
     pub fn eval_inv(&self, y: &Y, extrapolate: bool) -> X
     where
-        X: Ord + Default + Clone + Interpolatable,
-        Y: PartialOrd + InvertInterpolatable,
+        X: EvalInvX,
+        Y: EvalInvY,
     {
         if let Some(mut left) = self.first_key_value()
             && let Some(mut right) = self.last_key_value()
@@ -207,7 +143,7 @@ impl<X, Y> SegmentedLinearFn<X, Y> {
             // In the middle
             // Binary search
             loop {
-                let mid_x = left.0.lerp(&right.0, 0.5);
+                let mid_x = left.0.lerp(right.0, 0.5);
 
                 // mid_x >= left.0
                 // so `mid_left` cannot be `None`
@@ -219,7 +155,7 @@ impl<X, Y> SegmentedLinearFn<X, Y> {
                     left = mid_right;
                 } else {
                     let t = y.t_value(mid_left.1, mid_right.1);
-                    return mid_left.0.lerp(&mid_right.0, t);
+                    return mid_left.0.lerp(mid_right.0, t);
                 }
             }
         } else {
@@ -228,7 +164,36 @@ impl<X, Y> SegmentedLinearFn<X, Y> {
         }
     }
 
-    pub fn into_inv(self) -> SegmentedLinearFn<Y, X> where Y: Ord {
+    fn eval_bound_inv(&self, y_bound: Bound<&Y>, extrapolate: bool) -> Bound<X>
+    where
+        X: EvalInvX,
+        Y: EvalInvY,
+    {
+        match y_bound {
+            Unbounded => Unbounded,
+            Included(y) => Included(self.eval_inv(y, extrapolate)),
+            Excluded(y) => Excluded(self.eval_inv(y, extrapolate)),
+        }
+    }
+
+    /// Find the range of $x$ corresponding to that of $y$.
+    /// This works only for strictly increasing functions (which is invertible).
+    /// If not, the result is undefined.
+    pub fn x_range(&self, y_range: impl RangeBounds<Y>, extrapolate: bool) -> (Bound<X>, Bound<X>)
+    where
+        X: EvalInvX,
+        Y: EvalInvY,
+    {
+        (
+            self.eval_bound_inv(y_range.start_bound(), extrapolate),
+            self.eval_bound_inv(y_range.end_bound(), extrapolate),
+        )
+    }
+
+    pub fn into_inv(self) -> SegmentedLinearFn<Y, X>
+    where
+        Y: Ord,
+    {
         self.points.into_iter().map(|(x, y)| (y, x)).collect()
     }
 }
@@ -373,12 +338,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use assert_float_eq::assert_float_absolute_eq;
+    use ordered_float::OrderedFloat;
     use rand::RngExt;
     use tracing::debug;
     use tracing_test::traced_test;
 
-    use super::*;
+    type f64o = OrderedFloat<f64>;
 
     #[test]
     fn test_segmented_linear_fn() {

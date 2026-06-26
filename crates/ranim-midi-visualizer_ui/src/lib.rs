@@ -476,7 +476,7 @@ impl MidiVisualizerAppInner {
                                 synth.directive(MusicDirective::Stop);
                             } else {
                                 let time_range = self.inner.time..new_time;
-                                for (_, instant) in self.music.note_instants_during(&time_range) {
+                                for (_, instant) in self.music.note_instants_during(time_range) {
                                     let &Note { pitch, velocity } = instant.pair.1;
                                     if instant.is_end {
                                         synth.directive(NoteDirective::new_off(pitch).into());

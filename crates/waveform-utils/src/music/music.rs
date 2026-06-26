@@ -1,6 +1,6 @@
 use std::{
     num::NonZero,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Range},
     sync::{MappedRwLockReadGuard, RwLock, RwLockReadGuard},
 };
 
@@ -8,9 +8,10 @@ use derivative::Derivative;
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use tracing::info;
 
-use crate::music::{
+use super::{
     ControlContainer, DEFAULT_BEAT_RESOLUTION, MappedControlContainer, MappedNoteContainer, Metric,
-    NoteContainer, RawMusic, Tempo, TimeMap, control::PedalControl, time_map::generate_time_map,
+    MetricRange, NoteContainer, RawMusic, Tempo, TimeMap, control::PedalControl,
+    time_map::generate_time_map,
 };
 
 /// Default number of time divisions per second.
@@ -45,86 +46,56 @@ impl<Pitch, Control, TimeMapRef: Deref<Target = TimeMap>> NoteContainer
 
     fn notes_by_start(
         &self,
-    ) -> impl Iterator<
-        Item = (
-            Self::Pos,
-            std::ops::Range<Metric>,
-            &super::Note<Self::Pitch>,
-        ),
-    > {
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)> {
         self.notes.notes_by_start()
     }
 
-    fn notes_during<G>(
+    fn notes_during<R>(
         &self,
-        range: &G,
-    ) -> impl Iterator<
-        Item = (
-            Self::Pos,
-            std::ops::Range<Metric>,
-            &super::Note<Self::Pitch>,
-        ),
-    >
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
     where
-        G: std::ops::RangeBounds<Metric>,
+        R: MetricRange,
     {
         self.notes.notes_during(range)
     }
 
-    fn notes_overlaps<G>(
+    fn notes_overlaps<R>(
         &self,
-        range: &G,
-    ) -> impl Iterator<
-        Item = (
-            Self::Pos,
-            std::ops::Range<Metric>,
-            &super::Note<Self::Pitch>,
-        ),
-    >
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
     where
-        G: std::ops::RangeBounds<Metric>,
+        R: MetricRange,
     {
         self.notes.notes_overlaps(range)
     }
 
-    fn notes_start_during<G>(
+    fn notes_start_during<R>(
         &self,
-        range: &G,
-    ) -> impl Iterator<
-        Item = (
-            Self::Pos,
-            std::ops::Range<Metric>,
-            &super::Note<Self::Pitch>,
-        ),
-    >
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
     where
-        G: std::ops::RangeBounds<Metric>,
+        R: MetricRange,
     {
         self.notes.notes_start_during(range)
     }
 
-    fn notes_end_during<G>(
+    fn notes_end_during<R>(
         &self,
-        range: &G,
-    ) -> impl Iterator<
-        Item = (
-            Self::Pos,
-            std::ops::Range<Metric>,
-            &super::Note<Self::Pitch>,
-        ),
-    >
+        range: R,
+    ) -> impl Iterator<Item = (Self::Pos, Range<Metric>, &super::Note<Self::Pitch>)>
     where
-        G: std::ops::RangeBounds<Metric>,
+        R: MetricRange,
     {
         self.notes.notes_end_during(range)
     }
 
-    fn note_instants_during<'a, G>(
+    fn note_instants_during<'a, R>(
         &'a self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, super::NoteInstant<'a, Self::Pitch>)>
     where
-        G: std::ops::RangeBounds<Metric>,
+        R: MetricRange,
     {
         self.notes.note_instants_during(range)
     }
@@ -136,12 +107,12 @@ impl<'a, Pitch, Control, TimeMapRef: Deref<Target = TimeMap> + 'a> ControlContai
     type Control = Control;
     type Pos = usize;
 
-    fn controls_during<G>(
+    fn controls_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
     where
-        G: std::ops::RangeBounds<Metric>,
+        R: MetricRange,
     {
         self.controls.controls_during(range)
     }

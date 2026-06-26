@@ -1,6 +1,8 @@
-use std::{alloc::Allocator, ops::RangeBounds};
+use std::alloc::Allocator;
 
 use simple_interval_tree::MultiValueBTreeMap;
+
+use crate::music::MetricRange;
 
 use super::Metric;
 
@@ -8,29 +10,28 @@ pub trait ControlContainer {
     type Control;
     type Pos = ();
 
-    fn controls_during<G>(
+    fn controls_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
     where
-        G: RangeBounds<Metric>;
+        R: MetricRange;
 
     fn controls(&self) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)> {
-        self.controls_during(&..)
+        self.controls_during(..)
     }
 }
 
 impl<Control, A: Allocator + Clone> ControlContainer for MultiValueBTreeMap<Metric, Control, A> {
     type Control = Control;
 
-    fn controls_during<G>(
+    fn controls_during<R>(
         &self,
-        range: &G,
+        range: R,
     ) -> impl Iterator<Item = (Self::Pos, Metric, &Self::Control)>
     where
-        G: RangeBounds<Metric>,
+        R: MetricRange,
     {
-        self.range((range.start_bound(), range.end_bound()))
-            .map(|(&k, v)| ((), k, v))
+        self.range(range).map(|(&k, v)| ((), k, v))
     }
 }

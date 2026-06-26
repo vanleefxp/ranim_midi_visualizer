@@ -1,3 +1,4 @@
+pub mod interpolate;
 mod ladder;
 mod segmented_linear;
 

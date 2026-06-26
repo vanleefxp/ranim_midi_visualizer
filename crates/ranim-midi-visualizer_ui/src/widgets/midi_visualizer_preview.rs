@@ -361,7 +361,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     let time_range = self.time..=self.time;
                     let notes_on =
                         self.music
-                            .notes_overlaps(&time_range)
+                            .notes_overlaps(time_range)
                             .filter_map(|(pos, _, note)| {
                                 if key_range.contains(&note.pitch) {
                                     Some((note.pitch, pos))
@@ -613,7 +613,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     let time_range = self.time..(scroll_time + self.time);
                     let visible_notes = self
                         .music
-                        .notes_overlaps(&time_range)
+                        .notes_overlaps(time_range)
                         .filter(|(_, _, note)| key_range.contains(&note.pitch));
                     let notes_clip_rect = egui::Rect::from_min_size(
                         egui_view_top_left,

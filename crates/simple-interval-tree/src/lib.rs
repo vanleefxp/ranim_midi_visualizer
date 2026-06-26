@@ -17,39 +17,39 @@ use std::{
     ptr::NonNull,
 };
 
-type NodePtr<R, V> = NonNull<(Range<R>, V)>;
+type NodePtr<K, V> = NonNull<(Range<K>, V)>;
 
-struct EndpointRaw<'a, R, V> {
+struct EndpointRaw<'a, K, V> {
     pub is_end: bool,
-    pub at: &'a R,
-    pub node: NodePtr<R, V>,
+    pub at: &'a K,
+    pub node: NodePtr<K, V>,
 }
 
-pub struct Endpoint<'a, R, V> {
+pub struct Endpoint<'a, K, V> {
     pub is_end: bool,
-    pub at: &'a R,
-    pub pair: &'a (Range<R>, V),
+    pub at: &'a K,
+    pub pair: &'a (Range<K>, V),
 }
 
-impl<'a, R, V> From<EndpointRaw<'a, R, V>> for Endpoint<'a, R, V> {
-    fn from(value: EndpointRaw<'a, R, V>) -> Self {
+impl<'a, K, V> From<EndpointRaw<'a, K, V>> for Endpoint<'a, K, V> {
+    fn from(value: EndpointRaw<'a, K, V>) -> Self {
         let EndpointRaw { is_end, at, node } = value;
         let pair = unsafe { &*(node.as_ptr()) };
         Endpoint { is_end, at, pair }
     }
 }
 
-pub struct IntervalTree<R, V, A: Allocator + Clone = Global> {
-    starts: BTreeMap<R, SmallVec<[NodePtr<R, V>; 1]>, A>,
-    ends: BTreeMap<R, SmallVec<[NodePtr<R, V>; 1]>, A>,
+pub struct IntervalTree<K, V, A: Allocator + Clone = Global> {
+    starts: BTreeMap<K, SmallVec<[NodePtr<K, V>; 1]>, A>,
+    ends: BTreeMap<K, SmallVec<[NodePtr<K, V>; 1]>, A>,
     len: usize,
     alloc: A,
 }
 
-unsafe impl<R: Send, V: Send, A: Allocator + Clone + Send> Send for IntervalTree<R, V, A> {}
-unsafe impl<R: Sync, V: Sync, A: Allocator + Clone + Sync> Sync for IntervalTree<R, V, A> {}
+unsafe impl<K: Send, V: Send, A: Allocator + Clone + Send> Send for IntervalTree<K, V, A> {}
+unsafe impl<K: Sync, V: Sync, A: Allocator + Clone + Sync> Sync for IntervalTree<K, V, A> {}
 
-impl<R: Clone + Ord, V: Clone, A: Allocator + Clone> Clone for IntervalTree<R, V, A> {
+impl<K: Clone + Ord, V: Clone, A: Allocator + Clone> Clone for IntervalTree<K, V, A> {
     fn clone(&self) -> Self {
         let mut ptrs = HashMap::with_capacity(self.len());
 
@@ -86,7 +86,7 @@ impl<R: Clone + Ord, V: Clone, A: Allocator + Clone> Clone for IntervalTree<R, V
     }
 }
 
-impl<R, V, A: Allocator + Clone> Drop for IntervalTree<R, V, A> {
+impl<K, V, A: Allocator + Clone> Drop for IntervalTree<K, V, A> {
     fn drop(&mut self) {
         self.clear();
     }
@@ -94,17 +94,17 @@ impl<R, V, A: Allocator + Clone> Drop for IntervalTree<R, V, A> {
 
 /// Type representing an entry in the interval tree.
 #[allow(unused)]
-pub struct Entry<'a, R, V, A: Allocator + Clone = Global> {
+pub struct Entry<'a, K, V, A: Allocator + Clone = Global> {
     /// Which tree the entry is from. Used for verification before deletion.
     /// Deleting an entry from the wrong tree will cause the program to panic.
-    tree: *const IntervalTree<R, V, A>,
+    tree: *const IntervalTree<K, V, A>,
     /// The underlying node in the tree, owned by the tree.
-    node: NodePtr<R, V>,
-    _marker: PhantomData<&'a (Range<R>, V)>,
+    node: NodePtr<K, V>,
+    _marker: PhantomData<&'a (Range<K>, V)>,
 }
 
-impl<R, V, A: Allocator + Clone> Deref for Entry<'_, R, V, A> {
-    type Target = (Range<R>, V);
+impl<K, V, A: Allocator + Clone> Deref for Entry<'_, K, V, A> {
+    type Target = (Range<K>, V);
 
     fn deref(&self) -> &Self::Target {
         // SAFETY: all pointers should point to valid nodes.
@@ -112,7 +112,7 @@ impl<R, V, A: Allocator + Clone> Deref for Entry<'_, R, V, A> {
     }
 }
 
-impl<R, V, A> IntervalTree<R, V, A>
+impl<K, V, A> IntervalTree<K, V, A>
 where
     A: Allocator + Clone,
 {
@@ -126,35 +126,35 @@ where
     }
 }
 
-impl<R, V> IntervalTree<R, V> {
+impl<K, V> IntervalTree<K, V> {
     pub fn new() -> Self {
         Self::new_in(Global)
     }
 }
 
-impl<R, V> Default for IntervalTree<R, V> {
+impl<K, V> Default for IntervalTree<K, V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<R, V> FromIterator<(Range<R>, V)> for IntervalTree<R, V>
+impl<K, V> FromIterator<(Range<K>, V)> for IntervalTree<K, V>
 where
-    R: Ord + Clone,
+    K: Ord + Clone,
 {
-    fn from_iter<T: IntoIterator<Item = (Range<R>, V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (Range<K>, V)>>(iter: T) -> Self {
         let mut tree = Self::new();
         tree.extend(iter);
         tree
     }
 }
 
-impl<R, V, A> Extend<(Range<R>, V)> for IntervalTree<R, V, A>
+impl<K, V, A> Extend<(Range<K>, V)> for IntervalTree<K, V, A>
 where
-    R: Ord + Clone,
+    K: Ord + Clone,
     A: Allocator + Clone,
 {
-    fn extend<T: IntoIterator<Item = (Range<R>, V)>>(&mut self, iter: T) {
+    fn extend<T: IntoIterator<Item = (Range<K>, V)>>(&mut self, iter: T) {
         for (range, value) in iter {
             self.insert(range, value);
         }
@@ -162,34 +162,34 @@ where
 }
 
 #[inline(always)]
-unsafe fn nodes_to_tuples<'a, R: 'a, V: 'a>(
-    nodes: impl Iterator<Item = NodePtr<R, V>>,
-) -> impl Iterator<Item = &'a (Range<R>, V)> {
+unsafe fn nodes_to_tuples<'a, K: 'a, V: 'a>(
+    nodes: impl Iterator<Item = NodePtr<K, V>>,
+) -> impl Iterator<Item = &'a (Range<K>, V)> {
     nodes.map(|v| unsafe { &*(v.as_ptr()) })
 }
 
 #[inline(always)]
-unsafe fn nodes_to_ref_tuples<'a, R: 'a, V: 'a>(
-    nodes: impl Iterator<Item = NodePtr<R, V>>,
-) -> impl Iterator<Item = (&'a Range<R>, &'a V)> {
+unsafe fn nodes_to_ref_tuples<'a, K: 'a, V: 'a>(
+    nodes: impl Iterator<Item = NodePtr<K, V>>,
+) -> impl Iterator<Item = (&'a Range<K>, &'a V)> {
     unsafe { nodes_to_tuples(nodes).map(|(a, b)| (a, b)) }
 }
 
 #[inline(always)]
-unsafe fn nodes_to_tuples_double_ended<'a, R: 'a, V: 'a>(
-    nodes: impl DoubleEndedIterator<Item = NodePtr<R, V>>,
-) -> impl DoubleEndedIterator<Item = &'a (Range<R>, V)> {
+unsafe fn nodes_to_tuples_double_ended<'a, K: 'a, V: 'a>(
+    nodes: impl DoubleEndedIterator<Item = NodePtr<K, V>>,
+) -> impl DoubleEndedIterator<Item = &'a (Range<K>, V)> {
     nodes.map(|v| unsafe { &*(v.as_ptr()) })
 }
 
 #[inline(always)]
-unsafe fn nodes_to_ref_tuples_double_ended<'a, R: 'a, V: 'a>(
-    nodes: impl DoubleEndedIterator<Item = NodePtr<R, V>>,
-) -> impl DoubleEndedIterator<Item = (&'a Range<R>, &'a V)> {
+unsafe fn nodes_to_ref_tuples_double_ended<'a, K: 'a, V: 'a>(
+    nodes: impl DoubleEndedIterator<Item = NodePtr<K, V>>,
+) -> impl DoubleEndedIterator<Item = (&'a Range<K>, &'a V)> {
     unsafe { nodes_to_tuples_double_ended(nodes).map(|(a, b)| (a, b)) }
 }
 
-impl<R, V, A> IntervalTree<R, V, A>
+impl<K, V, A> IntervalTree<K, V, A>
 where
     A: Allocator + Clone,
 {
@@ -211,14 +211,14 @@ where
     }
 }
 
-impl<R, V, A> IntervalTree<R, V, A>
+impl<K, V, A> IntervalTree<K, V, A>
 where
-    R: Ord,
+    K: Ord,
     A: Allocator + Clone,
 {
-    pub fn insert(&mut self, range: Range<R>, value: V)
+    pub fn insert(&mut self, range: Range<K>, value: V)
     where
-        R: Clone,
+        K: Clone,
     {
         let Range { start, end } = range.clone();
         let node = Box::into_non_null_with_allocator(Box::new_in((range, value), &self.alloc)).0;
@@ -227,7 +227,7 @@ where
         self.len += 1;
     }
 
-    pub fn retain(&mut self, mut f: impl FnMut(&Range<R>, &mut V) -> bool) {
+    pub fn retain(&mut self, mut f: impl FnMut(&Range<K>, &mut V) -> bool) {
         let mut removed = HashSet::new();
         self.starts.retain(|_, v| {
             v.retain(|v| {
@@ -255,9 +255,9 @@ where
     /// # Safety
     /// The node must be a valid pointer to a node in the tree.
     #[allow(unused)]
-    unsafe fn remove_node(&mut self, node: NodePtr<R, V>) -> (Range<R>, V) {
+    unsafe fn remove_node(&mut self, node: NodePtr<K, V>) -> (Range<K>, V) {
         // SAFETY: we are removing a valid node from the tree.
-        let entry: Box<(Range<R>, V), _> = unsafe { Box::from_non_null_in(node, &self.alloc) };
+        let entry: Box<(Range<K>, V), _> = unsafe { Box::from_non_null_in(node, &self.alloc) };
         let (range, _) = entry.as_ref();
         let IntervalTree { starts, ends, .. } = self;
 
@@ -283,7 +283,7 @@ where
     }
 
     #[allow(unused)]
-    unsafe fn node_to_entry<'a>(&'a self, node: NodePtr<R, V>) -> Entry<'a, R, V, A> {
+    unsafe fn node_to_entry<'a>(&'a self, node: NodePtr<K, V>) -> Entry<'a, K, V, A> {
         Entry {
             tree: self as *const Self,
             node,
@@ -291,70 +291,70 @@ where
         }
     }
 
-    fn nodes_by_start(&self) -> impl DoubleEndedIterator<Item = NodePtr<R, V>> {
+    fn nodes_by_start(&self) -> impl DoubleEndedIterator<Item = NodePtr<K, V>> {
         self.starts.values().flat_map(|v| v.iter().copied())
     }
 
-    fn nodes_by_end(&self) -> impl DoubleEndedIterator<Item = NodePtr<R, V>> {
+    fn nodes_by_end(&self) -> impl DoubleEndedIterator<Item = NodePtr<K, V>> {
         self.ends.values().flat_map(|v| v.iter().copied())
     }
 
-    fn nodes_overlaps<G>(&self, range: &G) -> impl Iterator<Item = NodePtr<R, V>>
+    fn nodes_overlaps<R>(&self, range: R) -> impl Iterator<Item = NodePtr<K, V>>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         // start < range.end && end > range.start
         self.starts
             .range((Unbounded, range.end_bound()))
             .flat_map(|(_, nodes)| nodes.iter().copied())
-            .filter(|&node| {
+            .filter(move |&node| {
                 // SAFETY: all pointers should point to valid nodes.
-                let Range::<R> { end, .. } = unsafe { &(*(node.as_ptr())).0 };
+                let Range::<K> { end, .. } = unsafe { &(*(node.as_ptr())).0 };
                 (range.start_bound(), Unbounded)
                     .invert_inclusiveness()
                     .contains(end)
             })
     }
 
-    fn nodes_during<G>(&self, range: &G) -> impl Iterator<Item = NodePtr<R, V>>
+    fn nodes_during<R>(&self, range: R) -> impl Iterator<Item = NodePtr<K, V>>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         // start >= range.start && end <= range.end
         self.starts
             .range(range.bounds())
             .flat_map(|(_, nodes)| nodes.iter().copied())
-            .filter(|&node| {
+            .filter(move |&node| {
                 // SAFETY: all pointers should point to valid nodes.
-                let Range::<R> { end, .. } = unsafe { &(*(node.as_ptr())).0 };
+                let Range::<K> { end, .. } = unsafe { &(*(node.as_ptr())).0 };
                 range.bounds().invert_inclusiveness().contains(end)
             })
     }
 
-    fn nodes_starts_during<G>(&self, range: &G) -> impl DoubleEndedIterator<Item = NodePtr<R, V>>
+    fn nodes_starts_during<R>(&self, range: R) -> impl DoubleEndedIterator<Item = NodePtr<K, V>>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         self.starts
             .range((range.start_bound(), range.end_bound()))
             .flat_map(|(_, v)| v.iter().copied())
     }
 
-    fn nodes_ends_during<G>(&self, range: &G) -> impl DoubleEndedIterator<Item = NodePtr<R, V>>
+    fn nodes_ends_during<R>(&self, range: R) -> impl DoubleEndedIterator<Item = NodePtr<K, V>>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         self.ends
             .range((range.start_bound(), range.end_bound()).invert_inclusiveness())
             .flat_map(|(_, v)| v.iter().copied())
     }
 
-    fn endpoints_raw_during<'a, G>(
+    fn endpoints_raw_during<'a, R>(
         &'a self,
-        range: &G,
-    ) -> impl Iterator<Item = EndpointRaw<'a, R, V>>
+        range: R,
+    ) -> impl Iterator<Item = EndpointRaw<'a, K, V>>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         let starts_range = self.starts.range(range.bounds()).flat_map(|(r, v)| {
             v.iter().map(move |&node| EndpointRaw {
@@ -375,7 +375,7 @@ where
 
     // // FIXME: deletion via a node obtained from an iterator is not supported now.
     // // the design needs to be considered for safety reasons
-    // pub fn remove(&mut self, entry: &Entry<R, V, A>) -> (Range<R>, V) {
+    // pub fn remove(&mut self, entry: &Entry<K, V, A>) -> (Range<K>, V) {
     //     if !(self as *const Self).eq(&entry.tree) {
     //         panic!("Entry is not from this tree!");
     //     }
@@ -383,26 +383,26 @@ where
     //     unsafe { self.remove_node(entry.node) }
     // }
 
-    pub fn iter_endpoints_during<'a, G>(
+    pub fn iter_endpoints_during<'a, R>(
         &'a self,
-        range: &G,
-    ) -> impl Iterator<Item = Endpoint<'a, R, V>>
+        range: R,
+    ) -> impl Iterator<Item = Endpoint<'a, K, V>>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         self.endpoints_raw_during(range).map(Into::into)
     }
 
-    pub fn iter_endpoints<'a>(&'a self) -> impl Iterator<Item = Endpoint<'a, R, V>> {
-        self.iter_endpoints_during(&..)
+    pub fn iter_endpoints<'a>(&'a self) -> impl Iterator<Item = Endpoint<'a, K, V>> {
+        self.iter_endpoints_during(..)
     }
 
-    // pub fn endpoints_with_entries_during<'a, G>(
+    // pub fn endpoints_with_entries_during<'a, R>(
     //     &'a self,
-    //     range: &G,
-    // ) -> impl Iterator<Item = (bool, &'a R, Entry<'a, R, V, A>)>
+    //     range: &R,
+    // ) -> impl Iterator<Item = (bool, &'a K, Entry<'a, K, V, A>)>
     // where
-    //     G: RangeBounds<R>,
+    //     R: RangeBounds<K>,
     // {
     //     self.endpoints_with_nodes_during(range)
     //         .map(|(is_end, r, node)| {
@@ -414,18 +414,18 @@ where
 
     // pub fn endpoints_with_entries<'a>(
     //     &'a self,
-    // ) -> impl Iterator<Item = (bool, &'a R, Entry<'a, R, V, A>)> {
+    // ) -> impl Iterator<Item = (bool, &'a K, Entry<'a, K, V, A>)> {
     //     self.endpoints_with_entries_during(&..)
     // }
 
-    // pub fn entries_by_start<'a>(&'a self) -> impl Iterator<Item = Entry<'a, R, V, A>> {
+    // pub fn entries_by_start<'a>(&'a self) -> impl Iterator<Item = Entry<'a, K, V, A>> {
     //     self.nodes_by_start().map(|node| {
     //         // SAFETY: entry is from this tree.
     //         unsafe { self.node_to_entry(node) }
     //     })
     // }
 
-    // pub fn entries_by_end<'a>(&'a self) -> impl Iterator<Item = Entry<'a, R, V, A>> {
+    // pub fn entries_by_end<'a>(&'a self) -> impl Iterator<Item = Entry<'a, K, V, A>> {
     //     self.nodes_by_end().map(|node| {
     //         // SAFETY: entry is from this tree.
     //         unsafe { self.node_to_entry(node) }
@@ -433,12 +433,12 @@ where
     // }
 
     /// Returns an iterator over all entries in the tree, ordered by interval starts.
-    pub fn iter_by_start(&self) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
+    pub fn iter_by_start(&self) -> impl DoubleEndedIterator<Item = (&Range<K>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
         unsafe { nodes_to_ref_tuples_double_ended(self.nodes_by_start()) }
     }
 
-    pub fn into_iter_by_start(mut self) -> impl DoubleEndedIterator<Item = (Range<R>, V)>
+    pub fn into_iter_by_start(mut self) -> impl DoubleEndedIterator<Item = (Range<K>, V)>
     where
         A: 'static + Clone,
     {
@@ -451,18 +451,18 @@ where
             .flat_map(|v| v.into_iter())
             .map(move |node| {
                 // SAFETY: all pointers should point to valid nodes.
-                let node: Box<(Range<R>, V), _> = unsafe { Box::from_non_null_in(node, &alloc) };
+                let node: Box<(Range<K>, V), _> = unsafe { Box::from_non_null_in(node, &alloc) };
                 *node
             })
     }
 
     /// Returns an iterator over all entries in the tree, ordered by interval ends.
-    pub fn iter_by_end(&self) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
+    pub fn iter_by_end(&self) -> impl DoubleEndedIterator<Item = (&Range<K>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
         unsafe { nodes_to_ref_tuples_double_ended(self.nodes_by_end()) }
     }
 
-    pub fn into_iter_by_end(mut self) -> impl DoubleEndedIterator<Item = (Range<R>, V)>
+    pub fn into_iter_by_end(mut self) -> impl DoubleEndedIterator<Item = (Range<K>, V)>
     where
         A: 'static + Clone,
     {
@@ -474,49 +474,49 @@ where
             .flat_map(|v| v.into_iter())
             .map(move |node| {
                 // SAFETY: all pointers should point to valid nodes.
-                let node: Box<(Range<R>, V), _> = unsafe { Box::from_non_null_in(node, &alloc) };
+                let node: Box<(Range<K>, V), _> = unsafe { Box::from_non_null_in(node, &alloc) };
                 *node
             })
     }
 
-    pub fn iter_overlaps<G>(&self, range: &G) -> impl Iterator<Item = (&Range<R>, &V)>
+    pub fn iter_overlaps<R>(&self, range: R) -> impl Iterator<Item = (&Range<K>, &V)>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         // SAFETY: all pointers should point to valid nodes.
         unsafe { nodes_to_ref_tuples(self.nodes_overlaps(range)) }
     }
 
-    pub fn iter_during<G>(&self, range: &G) -> impl Iterator<Item = (&Range<R>, &V)>
+    pub fn iter_during<R>(&self, range: R) -> impl Iterator<Item = (&Range<K>, &V)>
     where
-        G: RangeBounds<R>,
+        R: RangeBounds<K>,
     {
         // SAFETY: all pointers should point to valid nodes.
         unsafe { nodes_to_ref_tuples(self.nodes_during(range)) }
     }
 
     /// Returns an iterator over entries whose starting point is within the given range.
-    pub fn iter_starts_during<G: RangeBounds<R>>(
+    pub fn iter_starts_during<R: RangeBounds<K>>(
         &self,
-        range: &G,
-    ) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
+        range: R,
+    ) -> impl DoubleEndedIterator<Item = (&Range<K>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
         unsafe { nodes_to_ref_tuples_double_ended(self.nodes_starts_during(range)) }
     }
 
     /// Returns an iterator over entries whose ending point is within the given range.
-    pub fn iter_ends_during<G: RangeBounds<R>>(
+    pub fn iter_ends_during<R: RangeBounds<K>>(
         &self,
-        range: &G,
-    ) -> impl DoubleEndedIterator<Item = (&Range<R>, &V)> {
+        range: R,
+    ) -> impl DoubleEndedIterator<Item = (&Range<K>, &V)> {
         // SAFETY: all pointers should point to valid nodes.
         unsafe { nodes_to_ref_tuples_double_ended(self.nodes_ends_during(range)) }
     }
 }
 
-impl<R, V, A> Debug for IntervalTree<R, V, A>
+impl<K, V, A> Debug for IntervalTree<K, V, A>
 where
-    R: Debug + Ord,
+    K: Debug + Ord,
     V: Debug,
     A: Allocator + Clone,
 {
@@ -655,7 +655,7 @@ mod tests {
 
         debug!("using `iter_during`");
         let mut count1 = 0usize;
-        for (range, value) in tree.iter_during(&query_range) {
+        for (range, value) in tree.iter_during(query_range.clone()) {
             debug!("{:?}: {:?}", range, value);
             assert!(range.start >= query_range.start);
             assert!(range.end <= query_range.end);
@@ -682,7 +682,7 @@ mod tests {
 
         debug!("using `iter_overlaps`");
         let mut count1 = 0usize;
-        for (range, value) in tree.iter_overlaps(&query_range) {
+        for (range, value) in tree.iter_overlaps(query_range.clone()) {
             debug!("{:?}: {:?}", range, value);
             assert!(range.start < query_range.end);
             assert!(range.end > query_range.start);
@@ -706,7 +706,7 @@ mod tests {
     fn test_iter_starts_during() {
         let tree = build_example_tree();
         let query_range = 4..7;
-        for (range, value) in tree.iter_starts_during(&query_range) {
+        for (range, value) in tree.iter_starts_during(query_range.clone()) {
             debug!("{:?}: {:?}", range, value);
             assert!(query_range.contains(&range.start));
         }
@@ -717,7 +717,7 @@ mod tests {
     fn test_iter_ends_during() {
         let tree = build_example_tree();
         let query_range = 1..=4;
-        for (range, value) in tree.iter_ends_during(&query_range) {
+        for (range, value) in tree.iter_ends_during(query_range.clone()) {
             debug!("{:?}: {:?}", range, value);
             assert!(query_range.contains(&range.end));
         }
