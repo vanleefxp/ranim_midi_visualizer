@@ -3,16 +3,63 @@
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
-use ranim::prelude::Interpolatable;
 use std::{
     collections::BTreeMap,
     iter::Sum,
-    ops::{Add, AddAssign},
+    ops::{Add, AddAssign, Bound::*},
 };
 use typed_floats::{tf32, tf64};
 
 type f32o = OrderedFloat<f32>;
 type f64o = OrderedFloat<f64>;
+
+/// A trait for interpolating to values
+///
+/// It uses the reference of two values and produce an owned interpolated value.
+pub trait Interpolatable {
+    /// Lerping between values
+    fn lerp(&self, target: &Self, t: f64) -> Self;
+}
+
+macro_rules! impl_interpolatable_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl Interpolatable for $t {
+                fn lerp(&self, target: &Self, t: f64) -> Self {
+                    (*self as f64).lerp(&(*target as f64), t) as $t
+                }
+            }
+        )*
+    };
+}
+
+impl_interpolatable_for_int!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
+);
+
+impl Interpolatable for f32 {
+    fn lerp(&self, target: &Self, t: f64) -> Self {
+        self + (target - self) * t as f32
+    }
+}
+
+impl Interpolatable for f64 {
+    fn lerp(&self, target: &Self, t: f64) -> Self {
+        self + (target - self) * t
+    }
+}
+
+impl Interpolatable for f32o {
+    fn lerp(&self, target: &Self, t: f64) -> Self {
+        self + (target - self) * f32o::from(t as f32)
+    }
+}
+
+impl Interpolatable for f64o {
+    fn lerp(&self, target: &Self, t: f64) -> Self {
+        self + (target - self) * f64o::from(t)
+    }
+}
 
 /// Trait for types that can perform the inverse of interpolation. i.e. find the relative position of a value in the
 /// interpolation range.
@@ -73,16 +120,18 @@ where
     }
 }
 
-pub trait XCallRequirement = Ord + InvertInterpolatable;
-pub trait YCallRequirement = Interpolatable + Clone + Default;
+pub trait EvalX = Ord + InvertInterpolatable;
+pub trait EvalY = Clone + Default + Interpolatable;
+pub trait EvalInvX = Ord + Default + Clone + Interpolatable;
+pub trait EvalInvY = PartialOrd + InvertInterpolatable;
 
 impl<X, Y> SegmentedLinearFn<X, Y> {
     /// Evaluate the segmented linear function at a given point $x$.
     /// If `extrapolate` is true, extrapolate the function beyond the range of the data points.
     pub fn eval(&self, x: &X, extrapolate: bool) -> Y
     where
-        X: XCallRequirement,
-        Y: YCallRequirement,
+        X: EvalX,
+        Y: EvalY,
     {
         let mut prev_iter = self.points.range(..x);
         let mut next_iter = self.points.range(x..);
@@ -118,12 +167,76 @@ impl<X, Y> SegmentedLinearFn<X, Y> {
             _ => Y::default(),
         }
     }
+
+    /// Evaluate the inverse function of the segmented linear function at a given point $y$.
+    /// This requires the current function to be strictly increasing.
+    /// If not, the result is undefined.
+    ///
+    /// The time complexity is $O(\log^2 n)$ due to the use of binary search in finding the range where $x$ is located
+    /// in.
+    pub fn eval_inv(&self, y: &Y, extrapolate: bool) -> X
+    where
+        X: Ord + Default + Clone + Interpolatable,
+        Y: PartialOrd + InvertInterpolatable,
+    {
+        if let Some(mut left) = self.first_key_value()
+            && let Some(mut right) = self.last_key_value()
+        {
+            if left.0 == right.0 {
+                // Only one point
+                return left.0.clone();
+            } else if y > right.1 {
+                // Right unbounded side
+                if extrapolate {
+                    left = self.range(..right.0).last().unwrap();
+                    let t = y.t_value(left.1, right.1);
+                    return left.0.lerp(right.0, t);
+                } else {
+                    return right.0.clone();
+                }
+            } else if y < left.1 {
+                // Left unbounded side
+                if extrapolate {
+                    right = self.range((Excluded(left.0), Unbounded)).next().unwrap();
+                    let t = y.t_value(left.1, right.1);
+                    return left.0.lerp(right.0, t);
+                } else {
+                    return left.0.clone();
+                }
+            }
+            // In the middle
+            // Binary search
+            loop {
+                let mid_x = left.0.lerp(&right.0, 0.5);
+
+                // mid_x >= left.0
+                // so `mid_left` cannot be `None`
+                let mid_left = self.range(..=&mid_x).last().unwrap();
+                let mid_right = self.range((Excluded(&mid_x), Unbounded)).next().unwrap();
+                if y < mid_left.1 {
+                    right = mid_left;
+                } else if y > mid_right.1 {
+                    left = mid_right;
+                } else {
+                    let t = y.t_value(mid_left.1, mid_right.1);
+                    return mid_left.0.lerp(&mid_right.0, t);
+                }
+            }
+        } else {
+            // No points
+            X::default()
+        }
+    }
+
+    pub fn into_inv(self) -> SegmentedLinearFn<Y, X> where Y: Ord {
+        self.points.into_iter().map(|(x, y)| (y, x)).collect()
+    }
 }
 
 impl<X, Y> FnOnce<(&X,)> for SegmentedLinearFn<X, Y>
 where
-    X: XCallRequirement,
-    Y: YCallRequirement,
+    X: EvalX,
+    Y: EvalY,
 {
     type Output = Y;
 
@@ -134,8 +247,8 @@ where
 
 impl<X, Y> FnMut<(&X,)> for SegmentedLinearFn<X, Y>
 where
-    X: XCallRequirement,
-    Y: YCallRequirement,
+    X: EvalX,
+    Y: EvalY,
 {
     extern "rust-call" fn call_mut(&mut self, args: (&X,)) -> Self::Output {
         self.call(args)
@@ -144,8 +257,8 @@ where
 
 impl<X, Y> Fn<(&X,)> for SegmentedLinearFn<X, Y>
 where
-    X: XCallRequirement,
-    Y: YCallRequirement,
+    X: EvalX,
+    Y: EvalY,
 {
     extern "rust-call" fn call(&self, args: (&X,)) -> Self::Output {
         self.eval(args.0, false)
@@ -260,6 +373,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use assert_float_eq::assert_float_absolute_eq;
+    use rand::RngExt;
+    use tracing::debug;
+    use tracing_test::traced_test;
+
     use super::*;
 
     #[test]
@@ -267,12 +385,12 @@ mod tests {
         let f = SegmentedLinearFn::from_iter(
             [(0., 0.), (1., 1.), (2., 1.), (3., 2.), (4., 0.)].map(|(x, y)| (f64o::from(x), y)),
         );
-        assert!(f(&f64o::from(-1.)) - 0. < 1e-10);
-        assert!(f(&f64o::from(0.5)) - 0.5 < 1e-10);
-        assert!(f(&f64o::from(1.5)) - 1. < 1e-10);
-        assert!(f(&f64o::from(2.5)) - 1.5 < 1e-10);
-        assert!(f(&f64o::from(3.5)) - 1. < 1e-10);
-        assert!(f(&f64o::from(5.)) - 0. < 1e-10);
+        assert_float_absolute_eq!(f(&f64o::from(-1.)), 0.);
+        assert_float_absolute_eq!(f(&f64o::from(0.5)), 0.5);
+        assert_float_absolute_eq!(f(&f64o::from(1.5)), 1.);
+        assert_float_absolute_eq!(f(&f64o::from(2.5)), 1.5);
+        assert_float_absolute_eq!(f(&f64o::from(3.5)), 1.);
+        assert_float_absolute_eq!(f(&f64o::from(5.)), 0.);
     }
 
     #[test]
@@ -305,6 +423,33 @@ mod tests {
         #[allow(clippy::useless_conversion)]
         for x in points.iter() {
             assert!(f64::from(h(x) - (f(x) + g(x))).abs() < 1e-10);
+        }
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_eval_inv() {
+        let f = SegmentedLinearFn::from_iter(
+            [(0., 0.), (1., 1.), (5., 10.), (8., 12.), (20., 15.)].map(|(x, y)| (f64o::from(x), y)),
+        );
+        let buf = 10.0;
+        let min_y = f
+            .first_key_value()
+            .map(|v| v.1)
+            .copied()
+            .unwrap_or_default()
+            - buf;
+        let max_y = f.last_key_value().map(|v| v.1).copied().unwrap_or_default() + buf;
+
+        for _ in 0..100 {
+            let orig_y_value = rand::rng().random_range(min_y..max_y);
+            let x_value = f.eval_inv(&orig_y_value, true);
+            let y_value = f.eval(&x_value, true);
+            debug!(
+                "f^(-1) ({}) = {}, f({}) = {}",
+                orig_y_value, x_value, x_value, y_value
+            );
+            assert_float_absolute_eq!(y_value, orig_y_value);
         }
     }
 }

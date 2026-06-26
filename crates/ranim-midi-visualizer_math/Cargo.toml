@@ -9,3 +9,9 @@ derive_more = { workspace = true }
 itertools = { workspace = true }
 ordered-float = { workspace = true }
 typed_floats = { workspace = true }
+
+[dev-dependencies]
+tracing = { workspace = true }
+tracing-test = { workspace = true }
+rand = { workspace = true }
+assert_float_eq = { workspace = true }
