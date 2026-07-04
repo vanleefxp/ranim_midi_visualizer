@@ -2,6 +2,7 @@ use std::{
     alloc::{Allocator, Global},
     collections::BTreeMap,
     fmt::Debug,
+    iter,
     ops::RangeBounds,
 };
 
@@ -62,22 +63,70 @@ impl<K: Ord, V, A: Allocator + Clone> Extend<(K, V)> for MultiValueBTreeMap<K, V
     }
 }
 
+pub struct WithKey<K> {
+    key: K,
+}
+
+impl<K: Clone, V> FnOnce<(V,)> for WithKey<K> {
+    type Output = (K, V);
+    extern "rust-call" fn call_once(self, args: (V,)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<K: Clone, V> FnMut<(V,)> for WithKey<K> {
+    extern "rust-call" fn call_mut(&mut self, args: (V,)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<K: Clone, V> Fn<(V,)> for WithKey<K> {
+    extern "rust-call" fn call(&self, args: (V,)) -> Self::Output {
+        (self.key.clone(), args.0)
+    }
+}
+
+type Bucket<V> = SmallVec<[V; 1]>;
+type BucketIter<K, V> = iter::Map<<Bucket<V> as IntoIterator>::IntoIter, WithKey<K>>;
+
+pub struct ToBucketIter;
+
+impl<K: Clone, V> FnOnce<((K, Bucket<V>),)> for ToBucketIter {
+    type Output = BucketIter<K, V>;
+    extern "rust-call" fn call_once(self, args: ((K, Bucket<V>),)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<K: Clone, V> FnMut<((K, Bucket<V>),)> for ToBucketIter {
+    extern "rust-call" fn call_mut(&mut self, args: ((K, Bucket<V>),)) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl<K: Clone, V> Fn<((K, Bucket<V>),)> for ToBucketIter {
+    extern "rust-call" fn call(&self, args: ((K, Bucket<V>),)) -> Self::Output {
+        let ((k, bucket),) = args;
+        bucket.into_iter().map(WithKey { key: k })
+    }
+}
+
+type MapIntoIter<K, V, A> = <BTreeMap<K, Bucket<V>, A> as IntoIterator>::IntoIter;
+pub type IntoIter<K, V, A> = iter::FlatMap<MapIntoIter<K, V, A>, BucketIter<K, V>, ToBucketIter>;
+
+impl<K: Ord + Clone, V, A: Allocator + Clone> IntoIterator for MultiValueBTreeMap<K, V, A> {
+    type Item = (K, V);
+    type IntoIter = IntoIter<K, V, A>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.map.into_iter().flat_map(ToBucketIter)
+    }
+}
+
 impl<K: Ord, V, A: Allocator + Clone> MultiValueBTreeMap<K, V, A> {
     pub fn insert(&mut self, k: K, v: V) {
         self.map.entry(k).or_default().push(v);
         self.len += 1;
-    }
-
-    // Implementing `IntoIterator` requires a concrete `Iterator` type which is not easily feasible
-    // because of the use of closure.
-    #[allow(clippy::should_implement_trait)]
-    pub fn into_iter(self) -> impl Iterator<Item = (K, V)>
-    where
-        K: Clone,
-    {
-        self.map
-            .into_iter()
-            .flat_map(|(k, v)| v.into_iter().map(move |v| (k.clone(), v)))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
