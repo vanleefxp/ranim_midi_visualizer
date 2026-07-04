@@ -11,7 +11,8 @@ use ranim::{Output, cmd::preview::Resolution};
 use ranim_midi_visualizer_math::func::LadderFn;
 use tracing::{error, info};
 use waveform_utils::{
-    music::{Music, NoteContainer as _, parse_midi}, synth::MusicDirective,
+    music::{Metric, Music, NoteContainer as _, parse_midi},
+    synth::MusicDirective,
 };
 
 use crate::{
@@ -48,7 +49,7 @@ impl MidiVisualizerAppInner2 {
 impl MidiVisualizerAppInner {
     /// Precomputed maximum note-per-second (NPS) function for the entire music.
     /// Used to accelerate the computation of maximum NPS at a specific time.
-    fn note_rate_max_fn(&self) -> Ref<'_, LadderFn<u64, usize>> {
+    fn note_rate_max_fn(&self) -> Ref<'_, LadderFn<Metric, usize>> {
         if self.cache.note_rate_max.borrow().is_none() {
             let nps_max_fn = self.music.as_mapped().note_rate_max_fn(self.time_window);
             self.cache.note_rate_max.replace(Some(nps_max_fn));
@@ -60,7 +61,7 @@ impl MidiVisualizerAppInner {
 
     /// Pre-computed note count function for the entire music.
     /// Used to accelerate the computation of the note count at a specific time.
-    fn note_count_fn(&self) -> Ref<'_, LadderFn<u64, usize>> {
+    fn note_count_fn(&self) -> Ref<'_, LadderFn<Metric, usize>> {
         if self.cache.note_count.borrow().is_none() {
             let note_count_fn = self.music.as_mapped().note_count_fn();
             self.cache.note_count.replace(Some(note_count_fn));
@@ -189,14 +190,8 @@ impl MidiVisualizerAppInner2 {
 
         // [TODO] when the division is not exact, there can be cumulative error
         // maybe define a new `StepGrid` struct with `large_step` and `small_step` fields
-        let dt = 100_000_000 / self.export_config.fps as u64 * n.unsigned_abs() as u64;
-        if n >= 0 {
-            self.time = (self.time + dt).min(self.music.duration());
-        } else if self.time > dt {
-            self.time -= dt;
-        } else {
-            self.time = 0;
-        }
+        let dt = 100_000_000 / self.export_config.fps as Metric * n as Metric;
+        self.time = (self.time + dt).clamp(0, self.music.duration());
 
         if playing {
             self.play();

@@ -288,7 +288,7 @@ fn preview(matches: &ArgMatches) -> Result<()> {
 }
 
 fn ui() {
-    // use ranim_midi_visualizer_ui::{MidiVisualizerApp, run_app};
-    // let app = MidiVisualizerApp::default();
-    // run_app(app);
+    use ranim_midi_visualizer_ui::{MidiVisualizerApp, run_app};
+    let app = MidiVisualizerApp::default();
+    run_app(app);
 }

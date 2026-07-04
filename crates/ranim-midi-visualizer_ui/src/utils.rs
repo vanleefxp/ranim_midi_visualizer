@@ -1,12 +1,13 @@
 #![allow(unused)]
 
 use std::{
+    collections::HashMap,
     num::{NonZero, NonZeroU64},
     ops::Range,
 };
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
-use eframe::egui::{self, ahash::HashMap};
+use eframe::egui;
 use ranim::{
     color::{AlphaColor, Rgba8, Srgb},
     core::{components::width::Width, num::Integer as _},
@@ -16,9 +17,10 @@ use ranim::{
         TextFont as RanimTextFont,
     },
 };
-use ranim_midi_visualizer_lib::{
-    ColorBy, MidiVisualizerConfig as RanimMidiVisualizerConfig,
-    ProgressBarConfig as RanimProgressBarConfig, StatusBarConfig as RanimStatusBarConfig,
+use ranim_midi_visualizer_lib::config::{
+    ColorBy, MetricBase, MidiVisualizerConfig as RanimMidiVisualizerConfig,
+    NoteConfig as RanimNoteConfig, ProgressBarConfig as RanimProgressBarConfig,
+    StatusBarConfig as RanimStatusBarConfig,
 };
 use ranim_music::items::{
     PianoKeyboardColor as RanimPianoKeyboardColor, PianoKeyboardConfig as RanimPianoKeyboardConfig,
@@ -62,7 +64,7 @@ pub fn to_egui_color(color: AlphaColor<Srgb>) -> egui::Color32 {
     RanimColor(color).into()
 }
 
-pub fn nano_to_time_string(nano: u64) -> String {
+pub fn nano_to_time_string(nano: i64) -> String {
     let micro = nano / 1000000;
     let (sec, micro) = micro.div_mod_floor(&1000);
     let (min, sec) = sec.div_mod_floor(&60);
@@ -125,9 +127,9 @@ pub struct ProgressBarConfig {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MidiVisualizerConfig {
-    pub colors: Vec<egui::Color32>,
+    pub metric_base: MetricBase,
+    pub note_config: NoteConfig,
     pub scroll_speed: f64,
-    pub color_by: ColorBy,
     pub buf_time: [u64; 2],
     pub keyboard_config: PianoKeyboardConfig,
     pub status_bar_config: StatusBarConfig,
@@ -149,13 +151,6 @@ pub struct FontVariant {
     style: FontStyle,
     weight: u16,
     stretch: u16,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TextFont {
-    famlies: Vec<String>,
-    variant: FontVariant,
-    features: HashMap<String, u32>,
 }
 
 impl From<RanimPianoKeyboardColor> for PianoKeyboardColor {
@@ -294,12 +289,49 @@ impl From<ProgressBarConfig> for RanimProgressBarConfig {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NoteConfig {
+    pub colors: Vec<egui::Color32>,
+    pub color_by: ColorBy,
+    pub h_scale: [f64; 2],
+}
+
+impl From<RanimNoteConfig> for NoteConfig {
+    fn from(value: RanimNoteConfig) -> Self {
+        let RanimNoteConfig {
+            colors,
+            color_by,
+            h_scale,
+        } = value;
+        NoteConfig {
+            colors: colors.into_iter().map(to_egui_color).collect(),
+            color_by,
+            h_scale: h_scale.map(f64::from),
+        }
+    }
+}
+
+impl From<NoteConfig> for RanimNoteConfig {
+    fn from(value: NoteConfig) -> Self {
+        let NoteConfig {
+            colors,
+            color_by,
+            h_scale,
+        } = value;
+        RanimNoteConfig {
+            colors: colors.into_iter().map(to_ranim_color).collect(),
+            color_by,
+            h_scale: h_scale.map(|v| v.try_into().unwrap()),
+        }
+    }
+}
+
 impl From<RanimMidiVisualizerConfig> for MidiVisualizerConfig {
     fn from(value: RanimMidiVisualizerConfig) -> Self {
         let RanimMidiVisualizerConfig {
-            colors,
+            metric_base,
+            note_config,
             scroll_speed,
-            color_by,
             buf_time,
             keyboard_config,
             status_bar_config,
@@ -308,9 +340,9 @@ impl From<RanimMidiVisualizerConfig> for MidiVisualizerConfig {
             text_font,
         } = value;
         MidiVisualizerConfig {
-            colors: colors.into_iter().map(to_egui_color).collect(),
+            metric_base,
             scroll_speed: scroll_speed.into(),
-            color_by,
+            note_config: note_config.into(),
             buf_time: buf_time.map(|v| (f64::from(v) * 1e9) as u64),
             keyboard_config: keyboard_config.into(),
             status_bar_config: status_bar_config.into(),
@@ -324,9 +356,9 @@ impl From<RanimMidiVisualizerConfig> for MidiVisualizerConfig {
 impl From<MidiVisualizerConfig> for RanimMidiVisualizerConfig {
     fn from(value: MidiVisualizerConfig) -> Self {
         let MidiVisualizerConfig {
-            colors,
+            metric_base,
+            note_config,
             scroll_speed,
-            color_by,
             buf_time,
             keyboard_config,
             status_bar_config,
@@ -335,9 +367,9 @@ impl From<MidiVisualizerConfig> for RanimMidiVisualizerConfig {
             text_font,
         } = value;
         RanimMidiVisualizerConfig {
-            colors: colors.into_iter().map(to_ranim_color).collect(),
+            metric_base,
+            note_config: note_config.into(),
             scroll_speed: scroll_speed.try_into().unwrap(),
-            color_by,
             buf_time: buf_time.map(|v| tf64::PositiveFinite::try_from(v as f64 / 1e9).unwrap()),
             keyboard_config: keyboard_config.into(),
             status_bar_config: status_bar_config.into(),

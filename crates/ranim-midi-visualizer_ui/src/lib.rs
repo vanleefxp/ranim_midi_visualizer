@@ -21,7 +21,7 @@ use ranim::{
     Output, OutputFormat, RanimScene, SceneConfig,
     cmd::{preview::Resolution, render_scene_output_with_progress},
 };
-use ranim_midi_visualizer_lib::{ColorBy, midi_visualizer_scene};
+use ranim_midi_visualizer_lib::{config::ColorBy, midi_visualizer_scene};
 use ranim_midi_visualizer_math::func::LadderFn;
 use std::{
     cell::RefCell,
@@ -34,7 +34,8 @@ use std::{
 use tracing::{debug, error, info};
 use typed_floats::tf64;
 use waveform_utils::{
-    music::{ControlContainer as _, Music, Note, NoteContainer as _}, synth::{MusicDirective, NoteDirective, Synth},
+    music::{ControlContainer as _, Metric, Music, Note, NoteContainer as _},
+    synth::{MusicDirective, NoteDirective, Synth},
 };
 
 #[allow(unused)]
@@ -56,8 +57,8 @@ pub(crate) static AUDIO_DEVICES: LazyLock<Vec<cpal::Device>> = LazyLock::new(|| 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MidiVisualizerAppCache {
     /// cache for NPS max function
-    note_rate_max: RefCell<Option<LadderFn<u64, usize>>>,
-    note_count: RefCell<Option<LadderFn<u64, usize>>>,
+    note_rate_max: RefCell<Option<LadderFn<Metric, usize>>>,
+    note_count: RefCell<Option<LadderFn<Metric, usize>>>,
     added_tab: RefCell<Option<(MidiVisualizerTab, egui_dock::NodePath)>>,
     // synth: RefCell<Option<Synthesizer>>,
     visible_tabs: RefCell<HashMap<MidiVisualizerTab, egui_dock::NodePath>>,
@@ -82,7 +83,7 @@ pub(crate) struct MidiVisualizerAppInner2 {
     /// scene clear color
     pub(crate) clear_color: egui::Color32,
     /// current playing time in nanoseconds
-    pub(crate) time: u64,
+    pub(crate) time: Metric,
     pub(crate) looping: bool,
     /// absolute time corresponding to the start of music
     ///
@@ -371,13 +372,13 @@ impl eframe::App for MidiVisualizerApp {
             }
         }
 
-        egui::Panel::top("top_panel").show_inside(ui, |ui| {
+        egui::Panel::top("top_panel").show(ui, |ui| {
             egui::MenuBar::default().ui(ui, |ui| self.menu_ui(ui));
         });
 
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(0))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let num_visible_tabs = self.inner.cache.visible_tabs.borrow().len();
                 let show_add_popup = num_visible_tabs < MidiVisualizerTab::VARIANT_COUNT;
 
@@ -425,7 +426,7 @@ impl MidiVisualizerAppInner {
             }
         }
 
-        egui::Panel::bottom("playback_control").show_inside(ui, |ui| {
+        egui::Panel::bottom("playback_control").show(ui, |ui| {
             // Playback control
             egui::MenuBar::default().ui(ui, |ui| {
                 // Jump to start
@@ -462,7 +463,7 @@ impl MidiVisualizerAppInner {
                             let mut synth = self.inner.synth.lock().unwrap();
                             let new_time = ((Instant::now() - start_t).as_nanos() as f64
                                 * self.playback_speed)
-                                as u64;
+                                as i64;
                             if new_time > self.music.duration() {
                                 if self.looping {
                                     // restarts from beginning
@@ -475,7 +476,11 @@ impl MidiVisualizerAppInner {
                                 synth.directive(MusicDirective::Stop);
                             } else {
                                 let time_range = self.inner.time..new_time;
-                                for (_, instant) in self.music.as_mapped().note_instants_during(time_range.clone()) {
+                                for (_, instant) in self
+                                    .music
+                                    .as_mapped()
+                                    .note_instants_during(time_range.clone())
+                                {
                                     let &Note { pitch, velocity } = instant.pair.1;
                                     debug!("playing note: {pitch} with velocity {velocity}");
                                     if instant.is_end {
@@ -490,7 +495,9 @@ impl MidiVisualizerAppInner {
                                         );
                                     }
                                 }
-                                for (_, _, &control) in self.music.as_mapped().controls_during(time_range.clone()) {
+                                for (_, _, &control) in
+                                    self.music.as_mapped().controls_during(time_range.clone())
+                                {
                                     debug!("playing control: {control:?}");
                                     synth.directive(MusicDirective::Control(control));
                                 }
@@ -589,7 +596,7 @@ impl MidiVisualizerAppInner {
         });
 
         // Preview area
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let mut preview_widget = MidiVisualizerPreview::new(
                 &self.music,
                 &self.visualizer_config,
@@ -684,8 +691,8 @@ impl MidiVisualizerAppInner {
                 {
                     ui.label("Note colors:");
                     ui.horizontal(|ui| {
-                        let note_colors = &mut self.inner.visualizer_config.colors;
-                        let color_by = self.inner.visualizer_config.color_by;
+                        let note_colors = &mut self.inner.visualizer_config.note_config.colors;
+                        let color_by = self.inner.visualizer_config.note_config.color_by;
                         for (i, color) in note_colors.iter_mut().enumerate() {
                             let mut resp = egui::color_picker::color_edit_button_srgba(
                                 ui,
@@ -694,8 +701,8 @@ impl MidiVisualizerAppInner {
                             );
                             use ColorBy::*;
                             match color_by {
-                                Channel => resp = resp.on_hover_text(format!("Channel {}", i + 1)),
-                                Track => resp = resp.on_hover_text(format!("Track {}", i + 1)),
+                                Voice => resp = resp.on_hover_text(format!("Channel {}", i + 1)),
+                                Staff => resp = resp.on_hover_text(format!("Track {}", i + 1)),
                                 KeyColor => match i {
                                     0 => resp = resp.on_hover_text("White key color"),
                                     1 => resp = resp.on_hover_text("Black key color"),
@@ -712,7 +719,10 @@ impl MidiVisualizerAppInner {
                                 .button(egui_phosphor::regular::PLUS)
                                 .on_hover_text("New color");
                             if resp.clicked() {
-                                self.visualizer_config.colors.push(egui::Color32::WHITE);
+                                self.visualizer_config
+                                    .note_config
+                                    .colors
+                                    .push(egui::Color32::WHITE);
                             }
                         }
 
@@ -720,12 +730,12 @@ impl MidiVisualizerAppInner {
                         {
                             let resp = ui
                                 .add_enabled(
-                                    self.visualizer_config.colors.len() > 1,
+                                    self.visualizer_config.note_config.colors.len() > 1,
                                     egui::Button::new(egui_phosphor::regular::MINUS),
                                 )
                                 .on_hover_text("Delete last color");
                             if resp.clicked() {
-                                self.visualizer_config.colors.pop();
+                                self.visualizer_config.note_config.colors.pop();
                             }
                         }
                     });
@@ -734,10 +744,10 @@ impl MidiVisualizerAppInner {
 
                 // Color by
                 {
-                    let color_by = self.inner.visualizer_config.color_by;
+                    let color_by = self.inner.visualizer_config.note_config.color_by;
                     let color_by_text = |color_by: ColorBy| match color_by {
-                        ColorBy::Channel => "Channel",
-                        ColorBy::Track => "Track",
+                        ColorBy::Voice => "Channel",
+                        ColorBy::Staff => "Track",
                         ColorBy::KeyColor => "White / black key",
                     };
 
@@ -745,9 +755,8 @@ impl MidiVisualizerAppInner {
                     egui::ComboBox::from_id_salt("color_by_combo")
                         .selected_text(color_by_text(color_by))
                         .show_ui(ui, |ui| {
-                            use ColorBy::*;
-                            let color_by = &mut self.inner.visualizer_config.color_by;
-                            for value in [Channel, Track, KeyColor] {
+                            let color_by = &mut self.inner.visualizer_config.note_config.color_by;
+                            for &value in ColorBy::VARIANTS {
                                 ui.selectable_value(color_by, value, color_by_text(value));
                             }
                         });
@@ -895,7 +904,7 @@ impl MidiVisualizerAppInner {
 
                     // Note horizontal scale
                     {
-                        let note_h_scale = &mut piano_keyboard_size.note_h_scale;
+                        let note_h_scale = &mut self.visualizer_config.note_config.h_scale;
                         ui.label("Note horizontal scale: ");
                         ui.horizontal(|ui| {
                             for (value, text) in

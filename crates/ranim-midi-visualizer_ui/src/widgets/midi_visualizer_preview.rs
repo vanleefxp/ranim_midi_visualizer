@@ -13,10 +13,10 @@ use music_utils::{
     key_idx_of_color, key_info, octave_range, white_idx_to_next_black_idx, white_tone,
 };
 use ranim::{cmd::preview::Resolution, glam::DVec2};
-use ranim_midi_visualizer_lib::ColorBy;
+use ranim_midi_visualizer_lib::config::ColorBy;
 use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 use std::{collections::HashMap, f32::consts::PI as PI_f32, ops::Range};
-use waveform_utils::music::{Music, Note, NoteContainer as _};
+use waveform_utils::music::{Metric, Music, Note, NoteContainer as _};
 
 fn points_on_circ(
     center: egui::Pos2,
@@ -148,7 +148,7 @@ pub struct MidiVisualizerPreview<'a> {
     /// output video resolution
     pub resolution: Resolution,
     /// current playing time in nanoseconds
-    pub time: u64,
+    pub time: Metric,
     /// cached metric data to avoid repetitive calculation
     pub cache: DataCache,
 }
@@ -174,9 +174,7 @@ impl<'a> MidiVisualizerPreview<'a> {
 impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
         let total_time = self.music.duration();
-        let mapped_music = self
-                        .music
-                        .as_mapped();
+        let mapped_music = self.music.as_mapped();
 
         let available_size = ui.available_size();
         let aspect_ratio = self.resolution.ratio();
@@ -357,8 +355,8 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                 let key_range = &self.visualizer_config.keyboard_config.key_range;
                 let keyboard_size = &self.visualizer_config.keyboard_config.size;
                 let keyboard_color = &self.visualizer_config.keyboard_config.color;
-                let color_by = self.visualizer_config.color_by;
-                let note_colors = self.visualizer_config.colors.as_slice();
+                let color_by = self.visualizer_config.note_config.color_by;
+                let note_colors = self.visualizer_config.note_config.colors.as_slice();
 
                 let highlighted_keys: HashMap<_, _> = {
                     let time_range = self.time..=self.time;
@@ -375,12 +373,12 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     {
                         use ColorBy::*;
                         match color_by {
-                            Channel => notes_on
+                            Voice => notes_on
                                 .map(|(pitch, [_, voice_idx])| {
                                     (pitch, *note_colors.index_cyc(voice_idx))
                                 })
                                 .collect(),
-                            Track => notes_on
+                            Staff => notes_on
                                 .map(|(pitch, [staff_idx, _])| {
                                     (pitch, *note_colors.index_cyc(staff_idx))
                                 })
@@ -612,7 +610,7 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     let egui_scroll_height =
                         egui_view_height - egui_status_bar_height - egui_keyboard_height;
                     let ranim_scroll_height = (egui_scroll_height / unit) as f64;
-                    let scroll_time = (ranim_scroll_height / scroll_speed * 1e9) as u64;
+                    let scroll_time = (ranim_scroll_height / scroll_speed * 1e9) as Metric;
                     let time_range = self.time..(scroll_time + self.time);
 
                     let visible_notes = mapped_music
@@ -622,19 +620,17 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                         egui_view_top_left,
                         egui::vec2(egui_view_width, egui_scroll_height),
                     );
-                    let [white_h_scale, black_h_scale] =
-                        self.visualizer_config.keyboard_config.size.note_h_scale;
+                    let [white_h_scale, black_h_scale] = self.visualizer_config.note_config.h_scale;
 
-                    let time_to_y = |time: u64| {
-                        let y_diff = (time.abs_diff(self.time) as f64
+                    let time_to_y = |time: Metric| {
+                        let y_diff = ((self.time - time) as f64
                             / self.music.time_resolution.get() as f64)
                             as f32
                             * egui_scroll_speed;
-                        let y_diff = if time < self.time { y_diff } else { -y_diff };
                         y_diff + egui_key_origin.y
                     };
 
-                    let note_rect = |time_range: Range<u64>, note: Note| {
+                    let note_rect = |time_range: Range<Metric>, note: Note| {
                         let (origin, is_black) = key_origin_and_color(note.pitch);
                         let y_max = time_to_y(time_range.start);
                         let y_min = time_to_y(time_range.end);
@@ -653,13 +649,15 @@ impl<'a> egui::Widget for MidiVisualizerPreview<'a> {
                     };
 
                     let note_shape =
-                        |time_range: Range<u64>, note: Note, [staff_idx, voice_idx]: [usize; 2]| {
+                        |time_range: Range<Metric>,
+                         note: Note,
+                         [staff_idx, voice_idx]: [usize; 2]| {
                             let rect = note_rect(time_range, note).intersect(notes_clip_rect);
                             let fill_color = {
                                 use ColorBy::*;
-                                match self.visualizer_config.color_by {
-                                    Channel => *note_colors.index_cyc(voice_idx),
-                                    Track => *note_colors.index_cyc(staff_idx),
+                                match self.visualizer_config.note_config.color_by {
+                                    Voice => *note_colors.index_cyc(voice_idx),
+                                    Staff => *note_colors.index_cyc(staff_idx),
                                     KeyColor => {
                                         *note_colors.index_cyc(is_black_key(note.pitch) as usize)
                                     }

@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 
 use derivative::Derivative;
+use enum_ordinalize::Ordinalize;
 use ranim::{
     color::{AlphaColor, Srgb, rgb8},
     glam::{DVec2, dvec2},
@@ -26,7 +27,7 @@ pub const DEFAULT_NOTE_COLORS: &[AlphaColor<Srgb>] = &[
     rgb8(0xf7, 0xc7, 0x1e),
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Ordinalize)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ColorBy {
     #[default]
@@ -35,7 +36,7 @@ pub enum ColorBy {
     KeyColor,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Ordinalize)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MetricBase {
     /// Metric in seconds

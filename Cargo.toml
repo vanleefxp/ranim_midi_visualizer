@@ -26,7 +26,7 @@ eframe = { workspace = true }
 ranim-midi-visualizer_lib = { workspace = true }
 waveform-utils = { workspace = true }
 typed_floats = { workspace = true }
-# ranim-midi-visualizer_ui = { path = "crates/ranim-midi-visualizer_ui" }
+ranim-midi-visualizer_ui = { path = "crates/ranim-midi-visualizer_ui" }
 
 [dependencies.clap]
 version = "4.5.57"
@@ -36,7 +36,7 @@ features = ["cargo", "color"]
 members = [
     "crates/ranim_music",
     "crates/ranim-midi-visualizer_lib",
-    # "crates/ranim-midi-visualizer_ui",
+    "crates/ranim-midi-visualizer_ui",
     "crates/music-utils",
     "crates/ranim-midi-visualizer_math",
     "crates/waveform-utils",
@@ -44,10 +44,9 @@ members = [
 ]
 
 [workspace.dependencies]
-eframe = "0.34.1"
-egui_dock = "0.19.1"
-egui-phosphor = "0.12.0"
-egui_tiles = "0.15.0"
+eframe = "0.35.0"
+egui_dock = "0.20.1"
+egui-phosphor = { git = "https://github.com/crumblingstatue/egui-phosphor.git", branch = "egui-035" }
 
 gpui = { git = "https://github.com/zed-industries/zed.git" }
 
@@ -78,7 +77,6 @@ serde = { version = "1.0.228", features = ["serde_derive"] }
 toml = "1.1.2"
 cpal = "0.17.3"
 midly = "0.5.3"
-rustysynth = { git = "https://github.com/vanleefxp/rustysynth_fork.git" }
 derivative = "2.2.0"
 smallvec = "1.15.1"
 paste = "1.0.15"

@@ -32,5 +32,4 @@ tracing = { workspace = true }
 enum-ordinalize = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true, features = ["serde"] }
-rustysynth = { workspace = true }
 cpal = { workspace = true }

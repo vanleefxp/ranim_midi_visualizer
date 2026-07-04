@@ -25,6 +25,7 @@ derivative = { workspace = true }
 simple-interval-tree = { workspace = true }
 derive_more = { workspace = true }
 tracing = { workspace = true }
+enum-ordinalize = { workspace = true }
 
 [features]
 serde = [
