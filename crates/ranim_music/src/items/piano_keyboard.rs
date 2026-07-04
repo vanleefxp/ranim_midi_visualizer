@@ -6,6 +6,7 @@ use std::{
     slice,
 };
 
+use derivative::Derivative;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::izip;
 use music_utils::{
@@ -13,40 +14,36 @@ use music_utils::{
     black_idx_to_prev_white_idx, is_black_key, is_black_key_otone, key_idx_of_color, octave_range,
 };
 use ranim::{
-    anims::morph::MorphAnim,
     color::{AlphaColor, Srgb, palettes::manim},
-    core::{
-        Extract, components::width::Width, core_item::CoreItem, num::Integer as _,
-        timeline::Timeline,
-    },
+    core::{Extract, components::width::Width, core_item::CoreItem, num::Integer as _},
     glam::{DVec2, DVec3, dvec2},
-    items::vitem::{
-        VItem,
-        geometry::{Rectangle, anchor::Origin},
-    },
+    items::vitem::{VItem, geometry::anchor::Origin},
     prelude::*,
-    utils::{bezier::PathBuilder, rate_functions::linear},
+    utils::bezier::PathBuilder,
 };
 use ranim_macros::Interpolatable;
 
 /// Size details of piano keyboard keys.
 /// All sizes are relative, using white key width as a unit.
-#[derive(Clone, Debug, PartialEq, Interpolatable)]
+#[derive(Derivative, Interpolatable)]
+#[derivative(Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PianoKeyboardSize {
     /// Width and height of white keys.
+    #[derivative(Default(value = "2. / 0.35"))]
     pub white_height: f64,
     /// Width and height of black keys.
+    #[derivative(Default(value = "dvec2(0.225 / 0.35, 1.1 / 0.35)"))]
     pub black_size: DVec2,
     /// Width and height of round corners at the bottom of keys.
+    #[derivative(Default(value = "DVec2::splat(0.08 / 0.35)"))]
     pub corner_size: DVec2,
     /// Displacement of black keys from the gap between white keys.
     /// Measured in multiples of half black key width.
     /// The values should typically be in the range `-1.0..=1.0`.
     /// `0.0` means the black key is perfectly centered between two white keys.
+    #[derivative(Default(value = "[-0.2, 0.2, -0.2, 0., 0.2]"))]
     pub black_offset: [f64; 5],
-    /// Scale of note widths.
-    pub note_h_scale: [f64; 2],
 }
 
 impl PianoKeyboardSize {
@@ -225,18 +222,6 @@ impl Locate<PianoKeyboard> for Tone {
     }
 }
 
-impl Default for PianoKeyboardSize {
-    fn default() -> Self {
-        Self {
-            white_height: 2. / 0.35,
-            black_size: dvec2(0.225 / 0.35, 1.1 / 0.35),
-            corner_size: dvec2(0.08 / 0.35, 0.08 / 0.35),
-            black_offset: [-0.2, 0.2, -0.2, 0., 0.2],
-            note_h_scale: [0.8, 1.],
-        }
-    }
-}
-
 impl Default for PianoKeyboardColor {
     fn default() -> Self {
         Self {
@@ -287,6 +272,10 @@ impl PianoKeyboard {
 
     pub fn size(&self) -> &PianoKeyboardSize {
         &self.size
+    }
+
+    pub fn size_unit(&self) -> f64 {
+        self.size_unit
     }
 
     pub fn set_size(&mut self, f: impl FnOnce(&mut PianoKeyboardSize)) -> &mut Self {
@@ -341,74 +330,6 @@ impl PianoKeyboard {
         Ref::map(self.keys.borrow(), |v| {
             v.as_ref().expect("`keys` can't be `None`")
         })
-    }
-
-    pub fn anim_note(
-        &self,
-        tl: &mut Timeline,
-        note_setup: impl Fn(&mut Rectangle),
-        tone: i8,
-        duration: f64,
-        scroll_speed: f64,
-        scroll_height: f64,
-    ) {
-        let unit = self.size_unit;
-        let (key_width, h_scale) = if is_black_key(tone) {
-            (self.size.black_size.x * unit, self.size.note_h_scale[1])
-        } else {
-            (unit, self.size.note_h_scale[0])
-        };
-        let origin = Tone(tone).locate(self) + ((1. - h_scale) * key_width * 0.5) * DVec3::X;
-        let top_left = origin + DVec3::Y * scroll_height;
-        let note_width = key_width * h_scale;
-        let note_height = scroll_speed * duration;
-        let scroll_time = scroll_height / scroll_speed;
-
-        // starts from nothing
-        let mut note =
-            Rectangle::from_min_size(top_left, dvec2(note_width, 0.)).with(|item| note_setup(item));
-        if note_height > scroll_height {
-            // fills the scroll height
-            let note2 = Rectangle::from_min_size(origin, dvec2(note_width, scroll_height))
-                .with(|item| note_setup(item));
-            // ends at nothing
-            let note3 = Rectangle::from_min_size(origin, dvec2(note_width, 0.))
-                .with(|item| note_setup(item));
-            tl.play(
-                note.morph_to(note2)
-                    .with_duration(scroll_time)
-                    .with_rate_func(linear),
-            )
-            .forward(duration - scroll_time)
-            .play(
-                note.morph_to(note3)
-                    .with_duration(scroll_time)
-                    .with_rate_func(linear),
-            );
-        } else {
-            let note2_bottom_left = origin + DVec3::Y * (scroll_height - note_height);
-            let note_size = dvec2(note_width, note_height);
-            let note2 = Rectangle::from_min_size(note2_bottom_left, note_size)
-                .with(|item| note_setup(item));
-            let note3 = Rectangle::from_min_size(origin, note_size).with(|item| note_setup(item));
-            let note4 = Rectangle::from_min_size(origin, dvec2(note_width, 0.))
-                .with(|item| note_setup(item));
-            tl.play(
-                note.morph_to(note2)
-                    .with_duration(duration)
-                    .with_rate_func(linear),
-            )
-            .play(
-                note.morph_to(note3)
-                    .with_duration(scroll_time - duration)
-                    .with_rate_func(linear),
-            )
-            .play(
-                note.morph_to(note4)
-                    .with_duration(duration)
-                    .with_rate_func(linear),
-            );
-        }
     }
 
     fn generate_keys(&self) -> Vec<VItem> {

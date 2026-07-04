@@ -1,129 +1,33 @@
+pub mod config;
+mod note_anim;
+use config::*;
+
 use std::{num::NonZero, ops::Range};
 
-use derivative::Derivative;
 use itertools::Itertools as _;
 use music_utils::is_black_key;
 use ranim::{
     Output, SceneConfig,
     anims::{func::Func, morph::MorphAnim},
     cmd::{preview::Resolution, render::render_scene_output},
-    color::{AlphaColor, Srgb},
     core::animation::{Eval, StaticAnim as _},
-    glam::{DVec2, DVec3, dvec2, dvec3},
+    glam::{DVec3, dvec2, dvec3},
     items::vitem::{
         geometry::{Rectangle, anchor::Origin},
-        text::{TextFont, TextItem},
+        text::TextItem,
     },
     prelude::*,
     utils::rate_functions::linear,
 };
 use ranim_midi_visualizer_math::cyc_index::IndexCyc as _;
 
-use ranim_music::items::{Pedal, PianoKeyboard, PianoKeyboardConfig, PianoPedals};
+use ranim_music::items::{Pedal, PianoKeyboard, PianoPedals};
 use typed_floats::tf64;
-use waveform_utils::music::{ControlContainer as _, Music, NoteContainer as _, NoteInstant};
+use waveform_utils::music::{
+    ControlContainer as _, Metric, Music, Note, NoteContainer as _, NoteInstant,
+};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ColorBy {
-    #[default]
-    Channel,
-    Track,
-    KeyColor,
-}
-
-/// Configuration for the bottom status bar displaying data.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct StatusBarConfig {
-    /// font size unit
-    pub em_size: f64,
-    /// bottom-left and top-right paddings
-    pub padding: [DVec2; 2],
-    /// background color
-    pub bg_color: AlphaColor<Srgb>,
-    /// text color
-    pub fg_color: AlphaColor<Srgb>,
-}
-
-impl StatusBarConfig {
-    /// Returns the height of the status bar. Equals to the sum of top padding, bottom padding, and font em-size.
-    pub fn height(&self) -> f64 {
-        self.em_size + self.padding[0].y + self.padding[1].y
-    }
-}
-
-impl Default for StatusBarConfig {
-    fn default() -> Self {
-        Self {
-            em_size: 0.2,
-            padding: [dvec2(0.1, 0.1), dvec2(0.1, 0.05)],
-            bg_color: AlphaColor::BLACK.with_alpha(0.9),
-            fg_color: AlphaColor::WHITE,
-        }
-    }
-}
-
-/// Top progress bar displaying the current time position in the song.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ProgressBarConfig {
-    /// progress bar height
-    pub height: f64,
-    /// progress bar foreground color
-    pub fg_color: AlphaColor<Srgb>,
-    /// progress bar background color
-    pub bg_color: AlphaColor<Srgb>,
-}
-
-impl Default for ProgressBarConfig {
-    fn default() -> Self {
-        Self {
-            height: 0.06,
-            fg_color: AlphaColor::from_rgb8(168, 163, 204), // rgb(168, 163, 204)
-            bg_color: AlphaColor::TRANSPARENT,
-        }
-    }
-}
-
-#[derive(Derivative)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derivative(Clone, Debug, Default)]
-// #[non_exhaustive]
-pub struct MidiVisualizerConfig {
-    #[derivative(Default(value = r#"
-        vec![
-            rgb8(0x89, 0xb9, 0xeb),
-            rgb8(0x9b, 0xe3, 0x47),
-            rgb8(0xf7, 0x93, 0x1e),
-            rgb8(0xf7, 0xc7, 0x1e),
-        ]
-    "#))]
-    pub colors: Vec<AlphaColor<Srgb>>,
-    #[derivative(Default(value = "2.0.try_into().unwrap()"))]
-    pub scroll_speed: tf64::StrictlyPositiveFinite,
-    #[derivative(Default(value = "ColorBy::Channel"))]
-    pub color_by: ColorBy,
-    #[derivative(Default(value = "[2.0.try_into().unwrap(), 2.0.try_into().unwrap()]"))]
-    pub buf_time: [tf64::PositiveFinite; 2],
-    pub keyboard_config: PianoKeyboardConfig,
-    pub status_bar_config: StatusBarConfig,
-    pub progress_bar_config: ProgressBarConfig,
-    #[derivative(Default(value = "1.0.try_into().unwrap()"))]
-    pub time_window: tf64::StrictlyPositive,
-    #[serde(skip)]
-    #[derivative(Default(value = r#"
-        TextFont::new([
-            "Maple Mono NF",
-            "Cascadia Code NF",
-            "LXGW WenKai Mono",
-            "Consolas",
-            "Monaco",
-            "Courier New",
-        ])
-    "#))]
-    pub text_font: TextFont,
-}
+use crate::note_anim::{anim_note_by_beat, anim_note_by_time};
 
 pub fn midi_visualizer_scene(
     r: &mut RanimScene,
@@ -134,10 +38,11 @@ pub fn midi_visualizer_scene(
     let cam = CameraFrame::default();
     r.insert(cam.clone());
 
+    let beat_resolution = song.as_ref().resolution;
     let time_resolution = song.time_resolution;
     let &MidiVisualizerConfig {
+        metric_base,
         scroll_speed,
-        color_by,
         buf_time,
         status_bar_config:
             StatusBarConfig {
@@ -146,7 +51,12 @@ pub fn midi_visualizer_scene(
                 ..
             },
         time_window,
-        ref colors,
+        note_config:
+            NoteConfig {
+                ref colors,
+                color_by,
+                h_scale,
+            },
         ..
     } = config;
     let time_window =
@@ -176,8 +86,6 @@ pub fn midi_visualizer_scene(
                         .shift(DVec3::NEG_Z * 1e-4)
                         .discard()
                 });
-        tl.play(i_status_bar_rect.show());
-
         // top rect for progress bar
         let i_progress_bar_rect =
             Rectangle::from_min_size(progress_bar_min, dvec2(frame_width, progress_bar_height))
@@ -187,7 +95,7 @@ pub fn midi_visualizer_scene(
                         .shift(DVec3::Z * 1e-4)
                         .discard()
                 });
-        tl.play(i_progress_bar_rect.show());
+        tl.play([i_status_bar_rect, i_progress_bar_rect].show());
     });
 
     // a template of the piano keyboard item
@@ -228,12 +136,21 @@ pub fn midi_visualizer_scene(
 
     let scroll_height =
         tf64::PositiveFinite::try_from(frame_height - i_keyboard_tem.aabb_size().y).unwrap();
-    let scroll_time = scroll_height / scroll_speed;
+    let scroll_time = match metric_base {
+        MetricBase::Beat => {
+            let height_in_beats = scroll_height / scroll_speed;
+            let height_in_ticks =
+                (beat_resolution.get() as f64 * f64::from(height_in_beats)) as i64;
+            let scroll_time_units = -song.time_map().eval(&-height_in_ticks, true);
+            scroll_time_units as f64 / time_resolution.get() as f64
+        }
+        MetricBase::Time => f64::from(scroll_height / scroll_speed),
+    };
     let duration = song.duration() as f64 / time_resolution.get() as f64;
 
-    let to_seconds = |time: u64| time as f64 / time_resolution.get() as f64;
+    let to_seconds = |time: Metric| time as f64 / time_resolution.get() as f64;
     let to_scene_time =
-        |midi_time: u64| to_seconds(midi_time) + f64::from(buf_time[0] + scroll_time);
+        |midi_time: Metric| to_seconds(midi_time) + f64::from(buf_time[0]) + scroll_time;
 
     // let instants = song.instants().collect::<Vec<_>>();
     let text_origin = |n_columns: usize, column: usize| {
@@ -348,7 +265,8 @@ pub fn midi_visualizer_scene(
         let mut note_rate_max = 0;
         let mut i_nps_text = create_nps_text(0, 0);
         tl.play(i_nps_text.show());
-        for (time, nps) in song.as_mapped()
+        for (time, nps) in song
+            .as_mapped()
             .note_rate_iter(time_window)
             .map(|(time, nps)| (to_scene_time(time), nps))
         {
@@ -424,8 +342,8 @@ pub fn midi_visualizer_scene(
                     item.highlight_keys(|m| {
                         use ColorBy::*;
                         let color = *colors.index_cyc(match color_by {
-                            Channel => voice_idx,
-                            Track => staff_idx,
+                            Voice => voice_idx,
+                            Staff => staff_idx,
                             KeyColor => is_black_key(key) as usize,
                         });
                         m.insert(key, color);
@@ -437,35 +355,71 @@ pub fn midi_visualizer_scene(
     });
 
     // note animations
-    for ([staff_idx, voice_idx], Range { start, end }, note) in song.as_mapped().notes_by_start() {
-        let t_start = to_seconds(start) + f64::from(buf_time[0]);
-        let duration = to_seconds(end - start);
 
+    for ([staff_idx, voice_idx], tick_range, &Note { pitch, velocity }) in
+        song.as_ref().notes_by_start()
+    {
+        use ColorBy::*;
+        use MetricBase::*;
+
+        let is_black = is_black_key(pitch);
         let color = {
-            use ColorBy::*;
             *colors.index_cyc(match color_by {
-                Channel => voice_idx,
-                Track => staff_idx,
-                KeyColor => is_black_key(note.pitch) as usize,
+                Voice => voice_idx,
+                Staff => staff_idx,
+                KeyColor => is_black as usize,
             })
         };
 
-        r.insert_with(|tl| {
-            tl.forward_to(t_start);
-            i_keyboard_tem.anim_note(
-                tl,
-                |item| {
-                    item.set_fill_color(color.with_alpha(f64::from(note.velocity) as f32))
-                        .set_stroke_color(AlphaColor::TRANSPARENT);
-                    item.stroke_width = 0.;
-                },
-                note.pitch,
-                duration,
-                scroll_speed.into(),
-                scroll_height.into(),
-            );
-            tl.hide();
-        });
+        let note_setup = move |item: &mut Rectangle| {
+            item.set_fill_color(color.with_alpha(f64::from(velocity) as f32))
+                .set_stroke_opacity(0.);
+            let pos = AabbPoint::CENTER.locate(item);
+            let scale_factor = h_scale[is_black as usize];
+            let scale = dvec3(scale_factor.into(), 1., 1.);
+            item.move_to(DVec3::ZERO).scale(scale).move_to(pos);
+        };
+
+        match metric_base {
+            Time => {
+                let Range {
+                    start: start_tick,
+                    end: end_tick,
+                } = tick_range;
+                let start_time_unit = song.time_map().eval(&start_tick, true);
+                let end_time_unit = song.time_map().eval(&end_tick, true);
+                r.insert_with(|tl| {
+                    tl.forward_to(buf_time[0].into());
+                    anim_note_by_time(
+                        tl,
+                        &i_keyboard_tem,
+                        note_setup,
+                        pitch,
+                        start_time_unit..end_time_unit,
+                        time_resolution,
+                        scroll_speed.into(),
+                        scroll_height.into(),
+                    );
+                });
+            }
+            Beat => {
+                r.insert_with(|tl| {
+                    tl.forward_to(buf_time[0].into());
+                    anim_note_by_beat(
+                        tl,
+                        &i_keyboard_tem,
+                        note_setup,
+                        pitch,
+                        tick_range.clone(),
+                        beat_resolution,
+                        time_resolution,
+                        &song.time_map(),
+                        scroll_speed.into(),
+                        scroll_height.into(),
+                    );
+                });
+            }
+        }
     }
 
     // Pedals

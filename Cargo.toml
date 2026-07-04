@@ -26,7 +26,7 @@ eframe = { workspace = true }
 ranim-midi-visualizer_lib = { workspace = true }
 waveform-utils = { workspace = true }
 typed_floats = { workspace = true }
-ranim-midi-visualizer_ui = { path = "crates/ranim-midi-visualizer_ui" }
+# ranim-midi-visualizer_ui = { path = "crates/ranim-midi-visualizer_ui" }
 
 [dependencies.clap]
 version = "4.5.57"
@@ -36,7 +36,7 @@ features = ["cargo", "color"]
 members = [
     "crates/ranim_music",
     "crates/ranim-midi-visualizer_lib",
-    "crates/ranim-midi-visualizer_ui",
+    # "crates/ranim-midi-visualizer_ui",
     "crates/music-utils",
     "crates/ranim-midi-visualizer_math",
     "crates/waveform-utils",
@@ -48,7 +48,8 @@ eframe = "0.34.1"
 egui_dock = "0.19.1"
 egui-phosphor = "0.12.0"
 egui_tiles = "0.15.0"
-egui_dialogs = { git = "https://github.com/vanleefxp/egui-dialogs_fork.git" }
+
+gpui = { git = "https://github.com/zed-industries/zed.git" }
 
 tracing = "0.1.44"
 tracing-indicatif = "0.3.14"
@@ -90,6 +91,7 @@ tracing-test = "0.2.6"
 rand = "0.10.1"
 assert_float_eq = "1.2.0"
 flagset = "0.4.7"
+taffy = "0.11.0"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"

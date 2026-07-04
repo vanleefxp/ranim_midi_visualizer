@@ -353,27 +353,32 @@ mod tests {
             [(0., 0.), (1., 1.), (2., 1.), (3., 2.), (4., 0.)].map(|(x, y)| (f64o::from(x), y)),
         );
         assert_float_absolute_eq!(f(&f64o::from(-1.)), 0.);
+        assert_float_absolute_eq!(f.eval(&f64o::from(-1.), true), -1.);
         assert_float_absolute_eq!(f(&f64o::from(0.5)), 0.5);
         assert_float_absolute_eq!(f(&f64o::from(1.5)), 1.);
         assert_float_absolute_eq!(f(&f64o::from(2.5)), 1.5);
         assert_float_absolute_eq!(f(&f64o::from(3.5)), 1.);
         assert_float_absolute_eq!(f(&f64o::from(5.)), 0.);
+        assert_float_absolute_eq!(f.eval(&f64o::from(5.), true), -2.);
     }
 
     #[test]
     fn test_segmented_linear_fn_int() {
         let f = SegmentedLinearFn::from_iter([
-            (0u64, 0u64),
+            (0i64, 0i64),
             (100, 100),
             (200, 100),
             (300, 200),
             (400, 0),
         ]);
+        assert_eq!(f(&-100), 0);
+        assert_eq!(f.eval(&-100, true), -100);
         assert_eq!(f(&50), 50);
         assert_eq!(f(&150), 100);
         assert_eq!(f(&250), 150);
         assert_eq!(f(&350), 100);
         assert_eq!(f(&500), 0);
+        assert_eq!(f.eval(&500, true), -200);
     }
 
     #[test]
@@ -389,7 +394,7 @@ mod tests {
         let points = [-1.5, -0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5].map(f64o::from);
         #[allow(clippy::useless_conversion)]
         for x in points.iter() {
-            assert!(f64::from(h(x) - (f(x) + g(x))).abs() < 1e-10);
+            assert_float_absolute_eq!(h(x), f(x) + g(x));
         }
     }
 

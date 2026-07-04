@@ -23,6 +23,8 @@ waveform-utils = { workspace = true }
 typed_floats = { workspace = true, features = ["serde"] }
 derivative = { workspace = true }
 simple-interval-tree = { workspace = true }
+derive_more = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 serde = [

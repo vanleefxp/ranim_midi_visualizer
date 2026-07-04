@@ -8,13 +8,12 @@ use phf::phf_map;
 use ranim::{
     Output, OutputFormat, RanimScene, SceneConfig, cmd::preview::Resolution, color::try_color,
 };
+use ranim_midi_visualizer_lib::{
+    config::{ColorBy, MetricBase, MidiVisualizerConfig, NoteConfig, ProgressBarConfig},
+    midi_visualizer_scene, render_midi_visualizer,
+};
 use typed_floats::tf64;
 use uncased::{AsUncased, UncasedStr};
-
-// use preview::{MidiVisualizerApp, run_app};
-use ranim_midi_visualizer_lib::{
-    ColorBy, MidiVisualizerConfig, ProgressBarConfig, midi_visualizer_scene, render_midi_visualizer,
-};
 use waveform_utils::music::{Music, parse_midi};
 
 static VIDEO_SIZES: phf::Map<&UncasedStr, Resolution> = phf_map! {
@@ -34,43 +33,46 @@ static VIDEO_FORMATS: phf::Map<&UncasedStr, OutputFormat> = phf_map! {
     UncasedStr::new("gif") => OutputFormat::Gif,
 };
 
-fn main() -> Result<()> {
-    {
-        use tracing::level_filters::LevelFilter;
-        use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+fn init_tracing() {
+    use tracing::level_filters::LevelFilter;
+    use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-        fn build_filter() -> EnvFilter {
-            const DEFAULT_DIRECTIVES: &[(&str, LevelFilter)] = &[
-                ("ranim_midi_visualizer_lib", LevelFilter::INFO),
-                ("ranim_midi_visualizer_ui", LevelFilter::DEBUG),
-                ("waveform_utils", LevelFilter::ERROR),
-                ("ranim_midi_visualizer", LevelFilter::INFO),
-                ("ranim_cli", LevelFilter::INFO),
-                ("ranim", LevelFilter::INFO),
-            ];
-            let mut filter = EnvFilter::from_default_env();
-            let env = std::env::var("RUST_LOG").unwrap_or_default();
-            for (name, level) in DEFAULT_DIRECTIVES
-                .iter()
-                .filter(|(name, _)| !env.contains(name))
-            {
-                filter = filter.add_directive(format!("{name}={level}").parse().unwrap());
-            }
-            filter
+    fn build_filter() -> EnvFilter {
+        const DEFAULT_DIRECTIVES: &[(&str, LevelFilter)] = &[
+            ("ranim_midi_visualizer_lib", LevelFilter::DEBUG),
+            ("ranim_midi_visualizer_ui", LevelFilter::DEBUG),
+            ("waveform_utils", LevelFilter::ERROR),
+            ("ranim_midi_visualizer", LevelFilter::INFO),
+            ("ranim_cli", LevelFilter::INFO),
+            ("ranim", LevelFilter::INFO),
+        ];
+        let mut filter = EnvFilter::from_default_env();
+        let env = std::env::var("RUST_LOG").unwrap_or_default();
+        for (name, level) in DEFAULT_DIRECTIVES
+            .iter()
+            .filter(|(name, _)| !env.contains(name))
+        {
+            filter = filter.add_directive(format!("{name}={level}").parse().unwrap());
         }
-
-        let indicatif_layer = tracing_indicatif::IndicatifLayer::new();
-
-        tracing_subscriber::registry()
-            .with(fmt::layer().with_writer(indicatif_layer.get_stderr_writer()))
-            .with(indicatif_layer)
-            .with(build_filter())
-            .init();
+        filter
     }
+
+    let indicatif_layer = tracing_indicatif::IndicatifLayer::new();
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(indicatif_layer.get_stderr_writer()))
+        .with(indicatif_layer)
+        .with(build_filter())
+        .init();
+}
+
+fn main() -> Result<()> {
+    init_tracing();
 
     let add_common_args = |cmd: Command| {
         cmd
         .arg(arg!(midi_file:  <INFILE> "Input midi file to render.").required(true))
+        .arg(arg!(-m --metric_base <VALUE> "Use beat metric or time metric.").default_value("time"))
         .arg(arg!(-s --size <SIZE> "Output video size.").value_names(["WIDTH", "HEIGHT"]).default_values(["1080p"]).num_args(1..=2))
         .arg(arg!(clear_color: --bg <COLOR> "Background color. In any supported CSS color format.").default_value("#282c34"))
         .arg(arg!(note_colors: --fg <COLOR>).default_values(["#89b9eb", "#9be347", "#f7931e", "#f7c71e"]).num_args(1..))
@@ -103,7 +105,26 @@ fn main() -> Result<()> {
     }
 }
 
-fn get_visualizer_config(matches: &ArgMatches) -> Result<MidiVisualizerConfig> {
+fn get_progress_bar_config(matches: &ArgMatches) -> Result<ProgressBarConfig> {
+    let progress_bar_fg = matches
+        .get_one::<String>("progress_bar_fg")
+        .unwrap()
+        .clone();
+    let progress_bar_fg = try_color(&progress_bar_fg)?;
+    let progress_bar_bg = matches
+        .get_one::<String>("progress_bar_bg")
+        .unwrap()
+        .clone();
+    let progress_bar_bg = try_color(&progress_bar_bg)?;
+
+    Ok(ProgressBarConfig {
+        fg_color: progress_bar_fg,
+        bg_color: progress_bar_bg,
+        ..Default::default()
+    })
+}
+
+fn get_note_config(matches: &ArgMatches) -> Result<NoteConfig> {
     let colors = {
         let mut note_colors = Vec::with_capacity(4);
         for color in matches
@@ -118,39 +139,43 @@ fn get_visualizer_config(matches: &ArgMatches) -> Result<MidiVisualizerConfig> {
     let color_by = {
         use ColorBy::*;
         let color_by = matches.get_one::<String>("color_by").unwrap();
-        if color_by == "channel" {
-            Channel
-        } else if color_by == "track" {
-            Track
+        if color_by == "channel" || color_by == "Voice" {
+            Voice
+        } else if color_by == "track" || color_by == "staff" {
+            Staff
         } else if color_by == "key_color" {
             KeyColor
         } else {
             bail!("Invalid color_by value: {color_by}");
         }
     };
-    let buf_time = get_buf_time(matches)?;
 
-    let progress_bar_fg = matches
-        .get_one::<String>("progress_bar_fg")
-        .unwrap()
-        .clone();
-    let progress_bar_fg = try_color(&progress_bar_fg)?;
-    let progress_bar_bg = matches
-        .get_one::<String>("progress_bar_bg")
-        .unwrap()
-        .clone();
-    let progress_bar_bg = try_color(&progress_bar_bg)?;
-
-    let visualizer_config = MidiVisualizerConfig {
-        scroll_speed: matches.get_one::<String>("scroll_speed").unwrap().parse()?,
-        buf_time,
+    Ok(NoteConfig {
         colors,
         color_by,
-        progress_bar_config: ProgressBarConfig {
-            fg_color: progress_bar_fg,
-            bg_color: progress_bar_bg,
-            ..Default::default()
-        },
+        ..Default::default()
+    })
+}
+
+fn get_visualizer_config(matches: &ArgMatches) -> Result<MidiVisualizerConfig> {
+    let metric_base = {
+        use MetricBase::*;
+        let metric_base = matches.get_one::<String>("metric_base").unwrap();
+        if metric_base == "time" {
+            Time
+        } else if metric_base == "beat" {
+            Beat
+        } else {
+            bail!("Invalid metric_base value: {metric_base}");
+        }
+    };
+
+    let visualizer_config = MidiVisualizerConfig {
+        metric_base,
+        scroll_speed: matches.get_one::<String>("scroll_speed").unwrap().parse()?,
+        buf_time: get_buf_time(matches)?,
+        note_config: get_note_config(matches)?,
+        progress_bar_config: get_progress_bar_config(matches)?,
         ..Default::default()
     };
 
@@ -165,7 +190,7 @@ fn get_song_and_name(matches: &ArgMatches) -> Result<(Music, String)> {
             .ok_or_else(|| anyhow!("invalid input"))?,
     );
     let src = std::fs::read(&midi_path)?;
-    let music = parse_midi(&src)?;
+    let music = parse_midi!(&src)?;
     let name = midi_path
         .file_stem()
         .map(|v| v.to_string_lossy().to_string())
@@ -263,7 +288,7 @@ fn preview(matches: &ArgMatches) -> Result<()> {
 }
 
 fn ui() {
-    use ranim_midi_visualizer_ui::{MidiVisualizerApp, run_app};
-    let app = MidiVisualizerApp::default();
-    run_app(app);
+    // use ranim_midi_visualizer_ui::{MidiVisualizerApp, run_app};
+    // let app = MidiVisualizerApp::default();
+    // run_app(app);
 }

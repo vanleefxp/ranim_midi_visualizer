@@ -13,6 +13,7 @@ ranim = { workspace = true }
 ranim-macros = { workspace = true }
 serde = { version = "1.0.228", optional = true }
 derive_more = { workspace = true }
+derivative = { workspace = true }
 music-utils = { workspace = true }
 glam = { workspace = true }
 
