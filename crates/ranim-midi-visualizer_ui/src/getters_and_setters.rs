@@ -233,7 +233,7 @@ impl MidiVisualizerAppInner2 {
 
     pub(crate) fn load_midi_file(&mut self, path: &PathBuf) {
         match std::fs::read(path) {
-            Ok(src) => match parse_midi(src.as_slice()) {
+            Ok(src) => match parse_midi!(src.as_slice()) {
                 Ok(music) => {
                     self.set_music(music);
                     self.midi_file = Some(path.clone());
@@ -249,7 +249,7 @@ impl MidiVisualizerAppInner2 {
     }
 
     pub(crate) fn load_midi_bytes(&mut self, src: &[u8]) {
-        match parse_midi(src) {
+        match parse_midi!(src) {
             Ok(music) => {
                 self.set_music(music);
             }

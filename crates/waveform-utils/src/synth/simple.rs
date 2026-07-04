@@ -6,11 +6,15 @@ use std::{
 
 use cpal::{FromSample, Sample, SizedSample};
 use derivative::Derivative;
-use flagset::{flags, FlagSet};
+use flagset::{FlagSet, flags};
 
 use super::Synth;
 use crate::{
-    envelope::{Envelope, ExpDecay}, freq::ToFrequency, music::Pedal, synth::{MusicDirective, NoteDirective}, waveform::{Triangle, Waveform},
+    envelope::{Envelope, ExpDecay},
+    freq::ToFrequency,
+    music::Pedal,
+    synth::{MusicDirective, NoteDirective},
+    waveform::{Triangle, Waveform},
 };
 
 flags! {
@@ -122,6 +126,8 @@ where
     /// Stop all notes.
     pub fn stop(&mut self) {
         self.note_states.clear();
+        self.pressed_notes.clear();
+        self.sustain_notes.clear();
         self.time = 0.0;
     }
 
@@ -146,7 +152,10 @@ where
 
     fn stop_sustained_notes(&mut self) {
         for note in self.sustain_notes.drain() {
-            if let Some(note_state) = self.note_states.get_mut(&note) && note_state.is_on && !self.pressed_notes.contains(&note) {
+            if let Some(note_state) = self.note_states.get_mut(&note)
+                && note_state.is_on
+                && !self.pressed_notes.contains(&note)
+            {
                 note_state.is_on = false;
                 note_state.trigger_time = self.time;
             }
@@ -229,21 +238,25 @@ where
                 } else {
                     self.release(&pitch);
                 }
-            },
+            }
             Control(control) => {
                 use Pedal::*;
                 let is_on = control.depth > 0.;
                 match control.pedal {
-                    Sustain => if is_on {
-                        self.start_sustain();
-                    } else {
-                        self.stop_sustain();
-                    },
-                    Sostenuto => if is_on {
-                        self.start_sostenuto()
-                    } else {
-                        self.stop_sostenuto();
-                    },
+                    Sustain => {
+                        if is_on {
+                            self.start_sustain();
+                        } else {
+                            self.stop_sustain();
+                        }
+                    }
+                    Sostenuto => {
+                        if is_on {
+                            self.start_sostenuto()
+                        } else {
+                            self.stop_sostenuto();
+                        }
+                    }
                     _ => (),
                 }
             }

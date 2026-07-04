@@ -21,10 +21,11 @@ pub use staff::*;
 pub use time_map::*;
 pub use voice::*;
 
-use std::{num::NonZero, ops::RangeBounds};
+use std::{num::NonZeroU64, ops::RangeBounds};
 use typed_floats::tf64;
 
-pub type Metric = u64;
+pub type Metric = i64;
 pub type Velocity = tf64::PositiveFinite;
-pub type Tempo = NonZero<Metric>;
+pub type FrameRate = NonZeroU64;
+pub type Window = NonZeroU64; // time window in metric units
 pub trait MetricRange = RangeBounds<Metric> + Clone;

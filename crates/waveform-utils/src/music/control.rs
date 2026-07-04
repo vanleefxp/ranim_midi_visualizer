@@ -8,7 +8,7 @@ pub enum Pedal {
     Sustain = 2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, )]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PedalControl {
     /// Which pedal is being controlled.
     pub pedal: Pedal,

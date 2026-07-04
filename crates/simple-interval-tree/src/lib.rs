@@ -1,4 +1,10 @@
-#![feature(allocator_api, associated_type_defaults, btreemap_alloc)]
+#![feature(
+    allocator_api,
+    associated_type_defaults,
+    btreemap_alloc,
+    unboxed_closures,
+    fn_traits
+)]
 
 pub mod multi_value_map;
 pub(crate) mod range;

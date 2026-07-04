@@ -7,26 +7,23 @@ use derivative::Derivative;
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use tracing::info;
 
-use crate::music::MappedNoteControlContainer;
-
 use super::{
-    DEFAULT_BEAT_RESOLUTION, MappedControlContainer, MappedNoteContainer, Metric,
-    RawMusic, Tempo, control::PedalControl,
+    DEFAULT_BEAT_RESOLUTION, FrameRate, MappedControlContainer, MappedNoteContainer,
+    MappedNoteControlContainer, Metric, RawMusic, TimeMap, control::PedalControl,
     time_map::generate_time_map,
 };
 
 /// Default number of time divisions per second.
-// SAFETY: non zero literal
-pub const DEFAULT_TIME_RESOLUTION: NonZero<Metric> = NonZero::new(1_000_000_000).unwrap(); // nanosecond-level resolution
+pub const DEFAULT_TIME_RESOLUTION: FrameRate = NonZero::new(1_000_000_000).unwrap(); // nanosecond-level resolution
 
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Music<Pitch = i8, Control = PedalControl> {
     pub(crate) inner: RawMusic<Pitch, Control>,
     /// Number of divisions per second
-    pub time_resolution: NonZero<Metric>,
+    pub time_resolution: FrameRate,
     /// The tempo curve of the music. Maps beats to tempo values in seconds per beat.
-    pub tempo: LadderFn<Metric, Tempo>,
+    pub tempo: LadderFn<Metric, FrameRate>,
 
     // cache fields
     /// A mapping from metric beats to time in seconds.
@@ -69,14 +66,15 @@ impl<Pitch, Control> AsMut<RawMusic<Pitch, Control>> for Music<Pitch, Control> {
 }
 
 pub type TimeMapRef<'a> = MappedRwLockReadGuard<'a, SegmentedLinearFn<Metric, Metric>>;
-pub type MappedMusic<'a, Pitch, Control, TimeMapRef> = MappedNoteControlContainer<'a, RawMusic<Pitch, Control>, TimeMapRef>;
+pub type MappedMusic<'a, Pitch, Control, TimeMapRef = &'a TimeMap> =
+    MappedNoteControlContainer<'a, RawMusic<Pitch, Control>, TimeMapRef>;
 
 impl<Pitch, Control> Music<Pitch, Control> {
-    pub fn from_beat_resolution(beat_resolution: NonZero<Metric>) -> Self {
+    pub fn from_beat_resolution(beat_resolution: FrameRate) -> Self {
         Self::new(beat_resolution, DEFAULT_TIME_RESOLUTION)
     }
 
-    pub fn new(beat_resolution: NonZero<Metric>, time_resolution: NonZero<Metric>) -> Self {
+    pub fn new(beat_resolution: FrameRate, time_resolution: FrameRate) -> Self {
         Self {
             inner: RawMusic::new(beat_resolution),
             time_resolution,
