@@ -1,11 +1,12 @@
 use std::{
-    iter, num::NonZero, ops::{Deref, Range},
+    iter,
+    ops::{Deref, Range},
 };
 
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use tracing::{debug, info};
 
-use super::{ControlContainer, Metric, MetricRange, Note, NoteContainer, NoteInstant, Tempo};
+use super::{ControlContainer, FrameRate, Metric, MetricRange, Note, NoteContainer, NoteInstant};
 
 pub type TimeMap = SegmentedLinearFn<Metric, Metric>;
 
@@ -134,11 +135,11 @@ impl<Container: ControlContainer, T: Deref<Target = TimeMap>> ControlContainer
 }
 
 pub(crate) fn generate_time_map(
-    tempo: &LadderFn<Metric, Tempo>,
-    tick_duration: Metric,            // duration of the song in ticks
-    beat_resolution: NonZero<Metric>, // ticks per beat
-    time_resolution: NonZero<Metric>, // time units per second
-    time_to_beat: bool,               // forward or inverse map
+    tempo: &LadderFn<Metric, FrameRate>,
+    tick_duration: Metric,      // duration of the song in ticks
+    beat_resolution: FrameRate, // ticks per beat
+    time_resolution: FrameRate, // time units per second
+    time_to_beat: bool,         // forward or inverse map
 ) -> SegmentedLinearFn<Metric, Metric> {
     let default_tempo = time_resolution;
 
@@ -160,7 +161,7 @@ pub(crate) fn generate_time_map(
     // add a last point at the end of the song
     {
         let n_beats = (tick - cur_tick) as f64 / beat_resolution.get() as f64;
-        let dt = (cur_tempo.get() as f64 * n_beats) as u64;
+        let dt = (cur_tempo.get() as f64 * n_beats) as i64;
         cur_time_units += dt;
         cur_tick = tick;
         debug!(
@@ -183,7 +184,11 @@ pub(crate) fn generate_time_map(
     time_map
 }
 
-pub struct MappedNoteControlContainer<'a, Container: NoteContainer + ControlContainer, TimeMapRef: Deref<Target = TimeMap> + 'a> {
+pub struct MappedNoteControlContainer<
+    'a,
+    Container: NoteContainer + ControlContainer,
+    TimeMapRef: Deref<Target = TimeMap> + 'a,
+> {
     pub notes: MappedNoteContainer<'a, Container, TimeMapRef>,
     pub controls: MappedControlContainer<'a, Container, TimeMapRef>,
 }
@@ -251,8 +256,8 @@ impl<Container: NoteContainer + ControlContainer, TimeMapRef: Deref<Target = Tim
     }
 }
 
-impl<'a, Container: NoteContainer + ControlContainer, TimeMapRef: Deref<Target = TimeMap> + 'a> ControlContainer
-    for MappedNoteControlContainer<'a, Container, TimeMapRef>
+impl<'a, Container: NoteContainer + ControlContainer, TimeMapRef: Deref<Target = TimeMap> + 'a>
+    ControlContainer for MappedNoteControlContainer<'a, Container, TimeMapRef>
 {
     type Control = Container::Control;
     type Pos = <Container as ControlContainer>::Pos;

@@ -5,11 +5,11 @@ use thiserror::Error;
 use tracing::{debug, error};
 use typed_floats::tf64;
 
-use crate::music::{DEFAULT_TIME_RESOLUTION, Music};
+use crate::music::Metric;
 
-use super::{Metric, Note, Pedal, PedalControl, RawMusic, Staff};
+use super::{FrameRate, Music, Note, Pedal, PedalControl, RawMusic, Staff};
 
-fn get_beat_resolution(timing: midly::Timing) -> NonZero<Metric> {
+fn get_beat_resolution(timing: midly::Timing) -> FrameRate {
     NonZero::try_from({
         use midly::Timing::*;
         match timing {
@@ -28,11 +28,10 @@ pub enum ParseMidiError {
     #[error("Failed to parse MIDI file.")]
     MidlyError(#[from] midly::Error),
     #[error("Time overflow: {0} + {1}.")]
-    TimeOverflow(u64, u64),
+    TimeOverflow(i64, i64),
 }
 
-pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, ParseMidiError> {
-    let time_resolution = DEFAULT_TIME_RESOLUTION; // [TODO] time_resolution as argument
+pub fn parse_midi_raw(src: &[u8], time_resolution: FrameRate) -> Result<RawMusic, ParseMidiError> {
     let (header, track_iter) = midly::parse(src).inspect_err(|err| error!("{:?}", err))?;
 
     // [TODO] handle sequential multiple tracks
@@ -44,12 +43,12 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, ParseMidiError> {
         let event_iter = event_iter.inspect_err(|err| error!("{:?}", err))?;
         debug!("New track!");
 
-        let mut cur_time = 0u64;
+        let mut cur_time = 0 as Metric;
         let mut time_units_per_beat = time_resolution;
 
         let mut staff = Staff::default();
         let mut note_states =
-            HashMap::<(u8, i8), SmallVec<[(u64, Note<i8>); 1]>>::with_capacity(10);
+            HashMap::<(u8, i8), SmallVec<[(i64, Note<i8>); 1]>>::with_capacity(10);
 
         for event in event_iter {
             let event = event.inspect_err(|err| error!("{:?}", err))?;
@@ -57,7 +56,7 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, ParseMidiError> {
 
             // advance time
             let dt = (event.delta.as_int() as u128 * time_units_per_beat.get() as u128
-                / beat_resolution.get() as u128) as u64;
+                / beat_resolution.get() as u128) as Metric;
             cur_time = cur_time
                 .checked_add(dt)
                 .ok_or(ParseMidiError::TimeOverflow(cur_time, dt))?;
@@ -159,8 +158,7 @@ pub fn parse_midi_raw(src: &[u8]) -> Result<RawMusic, ParseMidiError> {
     Ok(music)
 }
 
-pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
-    let time_resolution = DEFAULT_TIME_RESOLUTION; // [TODO] time_resolution as argument
+pub fn parse_midi(src: &[u8], time_resolution: FrameRate) -> Result<Music, ParseMidiError> {
     let (header, track_iter) = midly::parse(src).inspect_err(|err| error!("{:?}", err))?;
 
     let beat_resolution = get_beat_resolution(header.timing);
@@ -171,20 +169,20 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
         let event_iter = event_iter.inspect_err(|err| error!("{:?}", err))?;
         debug!("New track!");
 
-        let mut cur_tick = 0u64;
+        let mut cur_tick = 0 as Metric;
         // let mut cur_time = 0u64;
         let mut time_units_per_beat;
 
         let mut staff = Staff::default();
         let mut note_states =
-            HashMap::<(u8, i8), SmallVec<[(u64, Note<i8>); 1]>>::with_capacity(10);
+            HashMap::<(u8, i8), SmallVec<[(Metric, Note<i8>); 1]>>::with_capacity(10);
 
         for event in event_iter {
             let event = event.inspect_err(|err| error!("{:?}", err))?;
             debug!("{:?}", event);
 
             // advance tick
-            let delta_tick = event.delta.as_int() as u64;
+            let delta_tick = event.delta.as_int() as Metric;
             cur_tick = cur_tick
                 .checked_add(delta_tick)
                 .ok_or(ParseMidiError::TimeOverflow(cur_tick, delta_tick))?;
@@ -293,6 +291,24 @@ pub fn parse_midi(src: &[u8]) -> Result<Music, ParseMidiError> {
     Ok(music)
 }
 
+pub macro parse_midi_raw {
+    ($src: expr, $time_resolution: expr) => {
+        $crate::music::parse_midi_raw($src, $time_resolution)
+    },
+    ($src: expr) => {
+        $crate::music::parse_midi_raw($src, $crate::music::DEFAULT_TIME_RESOLUTION)
+    }
+}
+
+pub macro parse_midi {
+    ($src: expr, $time_resolution: expr) => {
+        $crate::music::parse_midi($src, $time_resolution)
+    },
+    ($src: expr) => {
+        $crate::music::parse_midi($src, $crate::music::DEFAULT_TIME_RESOLUTION)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Range;
@@ -309,7 +325,7 @@ mod tests {
     #[test]
     fn test_parse_midi_simple() {
         let src = include_bytes!("tests/little-star.mid").as_slice();
-        let music = parse_midi_raw(src);
+        let music = parse_midi_raw!(src);
         assert!(music.is_ok());
         let music = music.unwrap();
         assert!(music.notes_by_start().next().is_some());
@@ -319,8 +335,8 @@ mod tests {
     macro test_parse_midi($name:literal) {
         let src = include_bytes!($name).as_slice();
 
-        let music_raw = parse_midi_raw(src).unwrap();
-        let music = parse_midi(src).unwrap();
+        let music_raw = parse_midi_raw!(src).unwrap();
+        let music = parse_midi!(src).unwrap();
         assert!(music_raw.notes_by_start().next().is_some());
         assert!(music_raw.controls().next().is_some());
         assert!(music.inner.notes_by_start().next().is_some());
@@ -329,12 +345,6 @@ mod tests {
         let duration_raw = music_raw.duration;
         let duration = music.duration();
         let duration_diff = duration.abs_diff(duration_raw);
-
-        // an insignificant difference might be noticed
-        debug!("Duration using `RawMusic`: {}", duration_raw);
-        debug!("Duration using `Music`: {}", duration);
-        debug!("Duration difference: {}", duration_diff);
-        assert!(duration_diff < DURATION_TOL); // 1000000 nanoseconds = 1 millisecond
 
         // Checking if all notes match
         for ((pos1, range1, note1), (pos2, range2, note2)) in music_raw
@@ -369,13 +379,19 @@ mod tests {
             assert!(start_diff < DURATION_TOL);
             assert!(end_diff < DURATION_TOL);
         }
+
+        // an insignificant difference might be noticed
+        debug!("Duration using `RawMusic`: {}", duration_raw);
+        debug!("Duration using `Music`: {}", duration);
+        debug!("Duration difference: {}", duration_diff);
+        assert!(duration_diff < DURATION_TOL); // 1000000 nanoseconds = 1 millisecond
     }
 
     #[traced_test]
     #[test]
     fn test_time_map_cache() {
         let src = include_bytes!("tests/song_2.mid").as_slice();
-        let music = parse_midi(src).unwrap();
+        let music = parse_midi!(src).unwrap();
 
         // dead lock should not happen
 
@@ -404,7 +420,7 @@ mod tests {
     #[test]
     fn test_parse_not_midi() {
         let src = include_bytes!("tests/not-midi.txt").as_slice();
-        let music = parse_midi_raw(src);
+        let music = parse_midi_raw!(src);
         assert!(music.is_err());
     }
 
@@ -418,7 +434,7 @@ mod tests {
             .step_by(2)
             .take(10)
             .for_each(|v| *v = 255);
-        let music = parse_midi_raw(src.as_slice());
+        let music = parse_midi_raw!(src.as_slice());
         assert!(music.is_err());
     }
 }

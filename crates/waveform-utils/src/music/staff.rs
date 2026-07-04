@@ -1,9 +1,11 @@
-use std::{num::NonZeroU64, ops::Range};
+use std::ops::Range;
 
 use itertools::Itertools as _;
 use simple_interval_tree::MultiValueBTreeMap;
 
-use crate::music::{ControlContainer, MappedNoteControlContainer, NoteContainer, NoteInstant, TimeMap};
+use crate::music::{
+    ControlContainer, MappedNoteControlContainer, NoteContainer, NoteInstant, TimeMap, Window,
+};
 
 use super::{Metric, MetricRange, Note, PedalControl, Voice};
 
@@ -133,11 +135,11 @@ impl<Pitch, Control> NoteContainer for Staff<Pitch, Control> {
         self.voices.iter().map(|voice| voice.note_count()).sum()
     }
 
-    fn note_rate(&self, time: u64, window: NonZeroU64) -> usize {
+    fn note_rate(&self, time: Metric, window: Window) -> usize {
         self.voices.iter().map(|v| v.note_rate(time, window)).sum()
     }
 
-    fn legato_index(&self, time: u64, window: NonZeroU64) -> f64 {
+    fn legato_index(&self, time: Metric, window: Window) -> f64 {
         self.voices
             .iter()
             .map(|v| v.legato_index(time, window))
@@ -160,4 +162,5 @@ impl<Pitch, Control> ControlContainer for Staff<Pitch, Control> {
     }
 }
 
-pub type MappedStaff<'a, Pitch, Control, TimeMapRef> = MappedNoteControlContainer<'a, Staff<Pitch, Control>, TimeMapRef>;
+pub type MappedStaff<'a, Pitch, Control, TimeMapRef> =
+    MappedNoteControlContainer<'a, Staff<Pitch, Control>, TimeMapRef>;

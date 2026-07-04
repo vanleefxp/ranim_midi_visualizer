@@ -1,14 +1,13 @@
 use std::{
     alloc::Allocator,
     collections::BTreeMap,
-    num::NonZeroU64,
     ops::{Bound::*, IntoBounds as _, Range},
 };
 
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use simple_interval_tree::{Endpoint, IntervalTree};
 
-use super::{Metric, MetricRange, Note};
+use super::{Metric, MetricRange, Note, Window};
 
 pub struct NoteInstant<'a, Pitch: 'a> {
     pub is_end: bool,
@@ -97,14 +96,14 @@ pub trait NoteContainer {
         self.note_count_iter().collect()
     }
 
-    fn note_rate_iter(&self, window: NonZeroU64) -> impl Iterator<Item = (Metric, usize)> {
+    fn note_rate_iter(&self, window: Window) -> impl Iterator<Item = (Metric, usize)> {
         // instants where the start of notes enter or exit the time window
         // and how many notes flows in or out at the instant
         // NPS value only changes at these instants
         let mut nps_changes: BTreeMap<Metric, isize> = BTreeMap::new();
         for (_, range, _) in self.notes_by_start() {
             let enter_time = range.start;
-            let exit_time = range.start + window.get();
+            let exit_time = range.start + window.get() as Metric;
             nps_changes
                 .entry(enter_time)
                 .and_modify(|cnt| *cnt += 1)
@@ -128,13 +127,13 @@ pub trait NoteContainer {
             })
     }
 
-    fn note_rate_fn(&self, window: NonZeroU64) -> LadderFn<Metric, usize> {
+    fn note_rate_fn(&self, window: Window) -> LadderFn<Metric, usize> {
         self.note_rate_iter(window).collect()
     }
 
     /// Number of notes played in the time window.
-    fn note_rate(&self, time: u64, window: NonZeroU64) -> usize {
-        let time_range = time.saturating_sub(window.get())..time;
+    fn note_rate(&self, time: Metric, window: Window) -> usize {
+        let time_range = (time - window.get() as Metric)..time;
         self.notes_start_during(time_range).count()
     }
 
@@ -148,15 +147,15 @@ pub trait NoteContainer {
     /// + sum the lengths of the intersecting parts of the notes and the time window
     /// + divide the sum by the length of the time window
     ///
-    fn legato_index(&self, time: u64, window: NonZeroU64) -> f64 {
-        let time_range = time.saturating_sub(window.get())..time;
-        let duration_sum: u64 = {
+    fn legato_index(&self, time: Metric, window: Window) -> f64 {
+        let time_range = (time - window.get() as Metric)..time;
+        let duration_sum: Metric = {
             self.notes_overlaps(time_range.clone())
                 .map(|(_, range, _)| range.clone())
                 .map(|range| {
                     let (start, end) = time_range.clone().intersect(range);
                     match (start, end) {
-                        (Included(a) | Excluded(a), Included(b) | Excluded(b)) => a.abs_diff(b),
+                        (Included(a) | Excluded(a), Included(b) | Excluded(b)) => b - a,
                         _ => unreachable!(),
                     }
                 })
@@ -166,7 +165,7 @@ pub trait NoteContainer {
     }
 
     /// Calculates the legato index of the whole song. The returned result is a callable function.
-    fn legato_fn(&self, window: NonZeroU64) -> SegmentedLinearFn<u64, f64> {
+    fn legato_fn(&self, window: Window) -> SegmentedLinearFn<Metric, f64> {
         // `legato_index` calculate the legato index directly by definition,
         // However, for the computation of legato index of the whole song, this approach can be optimized given the
         // observation that the changing of legato index is a segmented linear function to time.
@@ -178,7 +177,7 @@ pub trait NoteContainer {
             .map(|(_, Range { start, end }, _)| {
                 // When it comes to the calculation of single-note legato score function, there are two cases:
                 let duration = end - start;
-                let window = window.get();
+                let window = window.get() as i64;
 
                 SegmentedLinearFn::from_iter(if duration > window {
                     // Case 1: the note is longer than the time window
@@ -216,7 +215,7 @@ pub trait NoteContainer {
             .sum()
     }
 
-    fn note_rate_max_iter(&self, window: NonZeroU64) -> impl Iterator<Item = (Metric, usize)> {
+    fn note_rate_max_iter(&self, window: Window) -> impl Iterator<Item = (Metric, usize)> {
         self.note_rate_iter(window)
             .scan(0, |nps_max, (time, nps)| {
                 if nps > *nps_max {
@@ -229,7 +228,7 @@ pub trait NoteContainer {
             .flatten()
     }
 
-    fn note_rate_max_fn(&self, window: NonZeroU64) -> LadderFn<Metric, usize> {
+    fn note_rate_max_fn(&self, window: Window) -> LadderFn<Metric, usize> {
         self.note_rate_max_iter(window).collect()
     }
 }

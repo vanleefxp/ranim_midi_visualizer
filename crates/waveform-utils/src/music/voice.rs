@@ -57,12 +57,17 @@ impl<Pitch> Voice<Pitch> {
     }
 }
 
-pub type MappedVoice<'a, Pitch, TimeMapRef> =  MappedNoteContainer<'a, VoiceInner<Pitch>, TimeMapRef>;
+pub type MappedVoice<'a, Pitch, TimeMapRef> =
+    MappedNoteContainer<'a, VoiceInner<Pitch>, TimeMapRef>;
 
-impl<Pitch: Clone, TimeMapRef: Deref<Target = TimeMap>> From<MappedVoice<'_, Pitch, TimeMapRef>> for Voice<Pitch> {
+impl<Pitch: Clone, TimeMapRef: Deref<Target = TimeMap>> From<MappedVoice<'_, Pitch, TimeMapRef>>
+    for Voice<Pitch>
+{
     fn from(value: MappedVoice<'_, Pitch, TimeMapRef>) -> Self {
-        let notes = value.notes_by_start()
-        .map(|(_, range, note)| (range, note.clone())).collect();
-    Voice { notes }
+        let notes = value
+            .notes_by_start()
+            .map(|(_, range, note)| (range, note.clone()))
+            .collect();
+        Voice { notes }
     }
 }

@@ -1,16 +1,14 @@
-use std::{
-    num::{NonZero, NonZeroU64},
-    ops::Range,
-};
+use std::ops::Range;
 
 use itertools::Itertools as _;
 
-use crate::music::{
-    ControlContainer, Metric, MetricRange, Note, NoteContainer, NoteInstant, PedalControl, Staff,
+use super::{
+    ControlContainer, FrameRate, Metric, MetricRange, Note, NoteContainer, NoteInstant,
+    PedalControl, Staff, Window,
 };
 
 /// Beat resolution in divisions per time unit.
-pub const DEFAULT_BEAT_RESOLUTION: NonZero<Metric> = NonZero::new(480).unwrap();
+pub const DEFAULT_BEAT_RESOLUTION: FrameRate = FrameRate::new(480).unwrap();
 
 /// Music without metric information.
 #[derive(Debug, Clone)]
@@ -20,7 +18,7 @@ pub struct RawMusic<Pitch = i8, Control = PedalControl> {
     /// The staves / tracks of the music.
     pub staves: Vec<Staff<Pitch, Control>>,
     /// Number of divisions per second.
-    pub resolution: NonZero<Metric>,
+    pub resolution: FrameRate,
 }
 
 impl<Pitch, Control> Default for RawMusic<Pitch, Control> {
@@ -111,11 +109,11 @@ impl<Pitch, Control> NoteContainer for RawMusic<Pitch, Control> {
             .kmerge_by(|(_, instant1), (_, instant2)| instant1.at < instant2.at)
     }
 
-    fn note_rate(&self, time: u64, window: NonZeroU64) -> usize {
+    fn note_rate(&self, time: Metric, window: Window) -> usize {
         self.staves.iter().map(|v| v.note_rate(time, window)).sum()
     }
 
-    fn legato_index(&self, time: u64, window: NonZeroU64) -> f64 {
+    fn legato_index(&self, time: Metric, window: Window) -> f64 {
         self.staves
             .iter()
             .map(|v| v.legato_index(time, window))
@@ -125,7 +123,7 @@ impl<Pitch, Control> NoteContainer for RawMusic<Pitch, Control> {
 }
 
 impl<Pitch, Control> RawMusic<Pitch, Control> {
-    pub fn new(resolution: NonZero<Metric>) -> Self {
+    pub fn new(resolution: FrameRate) -> Self {
         Self {
             duration: Default::default(),
             staves: Default::default(),
