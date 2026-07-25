@@ -259,7 +259,7 @@ impl PreviewArea {
                     white_key_width * keyboard_size.corner_size.x as f32,
                     white_key_width * keyboard_size.corner_size.y as f32,
                 );
-                let [white_color, black_color] = keyboard_color.key_color.map(|v| RanimColor(v));
+                let [white_color, black_color] = keyboard_color.key_color.map(RanimColor);
                 let stroke_color = RanimColor(keyboard_color.stroke_color);
                 let stroke_width = ranim_unit * visualizer_config.keyboard_config.stroke_width.0;
 

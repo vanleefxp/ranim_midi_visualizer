@@ -53,24 +53,24 @@ pub mod base {
                 }
                 Err(err) => {
                     error!("{}", err);
-                    let _ = window.prompt(
+                    drop(window.prompt(
                         PromptLevel::Critical,
                         "Invalid MIDI file",
                         Some(err.to_string().as_str()),
                         &[PromptButton::ok("OK")],
                         cx,
-                    );
+                    ));
                 }
             },
             Err(err) => {
                 error!("{}", err);
-                let _ = window.prompt(
+                drop(window.prompt(
                     PromptLevel::Critical,
                     "Failed to open file",
                     Some(err.to_string().as_str()),
                     &[PromptButton::ok("OK")],
                     cx,
-                );
+                ));
             }
         }
     }
@@ -102,13 +102,13 @@ pub mod base {
                     Err(err) => {
                         error!("{}", err);
                         cx.update(|window, cx| {
-                            let _ = window.prompt(
+                            drop(window.prompt(
                                 PromptLevel::Critical,
                                 "Error",
                                 Some(err.to_string().as_str()),
                                 &[PromptButton::ok("OK")],
                                 cx,
-                            );
+                            ));
                         })
                         .log_err();
                     }
