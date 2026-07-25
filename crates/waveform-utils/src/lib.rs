@@ -7,7 +7,8 @@
     range_into_bounds,
     allocator_api,
     associated_type_defaults,
-    trait_alias
+    trait_alias,
+    clamp_magnitude
 )]
 pub mod envelope;
 pub mod freq;

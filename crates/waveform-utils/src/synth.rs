@@ -6,6 +6,8 @@ use crate::{freq::ToFrequency, music::PedalControl};
 pub use simple::*;
 use typed_floats::tf64;
 
+type SynthSample = f32;
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MusicDirective<Pitch: ToFrequency = i8, Control = PedalControl> {
@@ -41,7 +43,7 @@ pub trait Synth<Directive = MusicDirective, Sample = f32>: Send + Sync + Any {
     /// Send directive to the synthesizer.
     fn directive(&mut self, directive: Directive);
     /// Write the currently generated sound to the audio buffer.
-    fn write_to_buffer(&mut self, config: &cpal::StreamConfig, buffer: &mut [Sample]);
+    fn write_to_buffer(&mut self, buffer: &mut [Sample]);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

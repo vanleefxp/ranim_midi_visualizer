@@ -25,7 +25,7 @@ fn get_beat_resolution(timing: midly::Timing) -> FrameRate {
 
 #[derive(Debug, Error)]
 pub enum ParseMidiError {
-    #[error("Failed to parse MIDI file.")]
+    #[error("{0}")]
     MidlyError(#[from] midly::Error),
     #[error("Time overflow: {0} + {1}.")]
     TimeOverflow(i64, i64),

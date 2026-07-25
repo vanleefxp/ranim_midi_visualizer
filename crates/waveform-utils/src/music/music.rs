@@ -16,6 +16,7 @@ use super::{
 /// Default number of time divisions per second.
 pub const DEFAULT_TIME_RESOLUTION: FrameRate = NonZero::new(1_000_000_000).unwrap(); // nanosecond-level resolution
 
+/// Representation of MIDI music with tempo curve.
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Music<Pitch = i8, Control = PedalControl> {
@@ -50,18 +51,6 @@ where
 impl<Pitch, Control> Default for Music<Pitch, Control> {
     fn default() -> Self {
         Self::new(DEFAULT_BEAT_RESOLUTION, DEFAULT_TIME_RESOLUTION)
-    }
-}
-
-impl<Pitch, Control> AsRef<RawMusic<Pitch, Control>> for Music<Pitch, Control> {
-    fn as_ref(&self) -> &RawMusic<Pitch, Control> {
-        &self.inner
-    }
-}
-
-impl<Pitch, Control> AsMut<RawMusic<Pitch, Control>> for Music<Pitch, Control> {
-    fn as_mut(&mut self) -> &mut RawMusic<Pitch, Control> {
-        &mut self.inner
     }
 }
 
@@ -122,6 +111,26 @@ impl<Pitch, Control> Music<Pitch, Control> {
 
     pub fn duration(&self) -> Metric {
         self.time_map().eval(&self.inner.duration, true)
+    }
+
+    pub fn duration_sec_f64(&self) -> f64 {
+        self.duration() as f64 / self.time_resolution.get() as f64
+    }
+
+    pub fn duration_sec_f32(&self) -> f32 {
+        self.duration_sec_f64() as f32
+    }
+
+    pub fn beat_resolution(&self) -> FrameRate {
+        self.inner.resolution
+    }
+
+    pub fn as_unmapped(&self) -> &RawMusic<Pitch, Control> {
+        &self.inner
+    }
+
+    pub fn as_unmapped_mut(&mut self) -> &mut RawMusic<Pitch, Control> {
+        &mut self.inner
     }
 
     pub fn as_mapped(&self) -> MappedMusic<'_, Pitch, Control, TimeMapRef<'_>> {
