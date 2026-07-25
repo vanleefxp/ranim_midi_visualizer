@@ -1,0 +1,35 @@
+[package]
+name = "ranim-midi-visualizer_ui_gpui"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ranim = { workspace = true }
+
+gpui = { workspace = true }
+gpui_util = { workspace = true }
+gpui_platform = { workspace = true }
+gpui-component = { workspace = true }
+gpui-component-assets = { workspace = true }
+rfd = { workspace = true }
+dark-light = { workspace = true }
+
+waveform-utils = { workspace = true }
+ranim-midi-visualizer_lib = { workspace = true }
+ranim-midi-visualizer_math = { workspace = true }
+music-utils = { workspace = true }
+
+derive_more = { workspace = true }
+derivative = { workspace = true }
+serde = { workspace = true }
+schemars = { workspace = true }
+tracing = { workspace = true }
+typed_floats = { workspace = true }
+anyhow = { workspace = true }
+jiff = { workspace = true }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+tracing-test = { workspace = true }

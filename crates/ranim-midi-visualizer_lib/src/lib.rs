@@ -38,7 +38,7 @@ pub fn midi_visualizer_scene(
     let cam = CameraFrame::default();
     r.insert(cam.clone());
 
-    let beat_resolution = song.as_ref().resolution;
+    let beat_resolution = song.as_unmapped().resolution;
     let time_resolution = song.time_resolution;
     let &MidiVisualizerConfig {
         metric_base,
@@ -225,7 +225,7 @@ pub fn midi_visualizer_scene(
     //
     r.insert_with(|tl| {
         let origin = text_origin(4, 1);
-        let note_count_total = song.as_ref().note_count();
+        let note_count_total = song.as_unmapped().note_count();
         let create_note_count_text = |n: usize| {
             let src = format!("NOTE COUNT {n} / {note_count_total}");
             TextItem::new(src, font_size)
@@ -357,7 +357,7 @@ pub fn midi_visualizer_scene(
     // note animations
 
     for ([staff_idx, voice_idx], tick_range, &Note { pitch, velocity }) in
-        song.as_ref().notes_by_start()
+        song.as_unmapped().notes_by_start()
     {
         use ColorBy::*;
         use MetricBase::*;

@@ -24,8 +24,7 @@ impl Default for MidiVisualizerAppInner2 {
             looping: false,
             play_start_t: None,
 
-            // SAFETY: positive literal
-            time_window: unsafe { NonZeroU64::new_unchecked(1_000_000_000) }, // 1 second
+            time_window: NonZeroU64::new(1_000_000_000).unwrap(), // 1 second
             playback_speed: 1.0,
 
             export_config: Default::default(),
