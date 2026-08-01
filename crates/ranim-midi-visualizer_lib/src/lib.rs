@@ -1,3 +1,5 @@
+#![feature(decl_macro)]
+
 pub mod config;
 mod note_anim;
 use config::*;
@@ -8,9 +10,8 @@ use itertools::Itertools as _;
 use music_utils::is_black_key;
 use ranim::{
     Output, SceneConfig,
-    anims::{func::Func, morph::MorphAnim},
     cmd::{preview::Resolution, render::render_scene_output},
-    core::animation::{Eval, StaticAnim as _},
+    core::animation::StaticAnim as _,
     glam::{DVec3, dvec2, dvec3},
     items::vitem::{
         geometry::{Rectangle, anchor::Origin},
@@ -35,8 +36,33 @@ pub fn midi_visualizer_scene(
     config: &MidiVisualizerConfig,
     resolution: Resolution,
 ) {
-    let cam = CameraFrame::default();
-    r.insert(cam.clone());
+    // Design of the visualizer scene:
+    //
+    // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+    // ┃ Progress Bar                                                                  ┃
+    // ┠───────────────────────────────────────────────────────────────────────────────┨
+    // ┃ Note scrolling area                                                           ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┃                                                                 ┌─────────────┨
+    // ┃                                                                 │ Pedals      ┃
+    // ┃                                                                 │             ┃
+    // ┃                                                                 │             ┃
+    // ┠─────────────────────────────────────────────────────────────────┴─────────────┨
+    // ┃ Piano Keyboard                                                                ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┃                                                                               ┃
+    // ┠───────────────────────────────────────────────────────────────────────────────┨
+    // ┃ Status Bar                                                                    ┃
+    // ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    let i_cam = CameraFrame::default();
 
     let beat_resolution = song.as_unmapped().resolution;
     let time_resolution = song.time_resolution;
@@ -63,7 +89,7 @@ pub fn midi_visualizer_scene(
         NonZero::try_from((f64::from(time_window) * time_resolution.get() as f64) as u64).unwrap();
     let font = config.text_font.clone();
 
-    let frame_height = cam.frame_height;
+    let frame_height = i_cam.frame_height;
     let frame_width = frame_height * resolution.width as f64 / resolution.height as f64;
     let frame_rx = frame_width / 2.;
     let frame_ry = frame_height / 2.;
@@ -73,30 +99,6 @@ pub fn midi_visualizer_scene(
     let progress_bar_height = config.progress_bar_config.height;
     let progress_bar_min = frame_top_left - DVec3::Y * progress_bar_height;
     let status_bar_height = config.status_bar_config.height();
-
-    // Static Items
-    //
-    r.insert_with(|tl| {
-        // Bottom rect for status bar
-        let i_status_bar_rect =
-            Rectangle::from_min_size(frame_bottom_left, dvec2(frame_width, status_bar_height))
-                .with(|item| {
-                    item.set_color(config.status_bar_config.bg_color)
-                        .set_stroke_opacity(0.)
-                        .shift(DVec3::NEG_Z * 1e-4)
-                        .discard()
-                });
-        // top rect for progress bar
-        let i_progress_bar_rect =
-            Rectangle::from_min_size(progress_bar_min, dvec2(frame_width, progress_bar_height))
-                .with(|item| {
-                    item.set_fill_color(config.progress_bar_config.bg_color)
-                        .set_stroke_opacity(0.)
-                        .shift(DVec3::Z * 1e-4)
-                        .discard()
-                });
-        tl.play([i_status_bar_rect, i_progress_bar_rect].show());
-    });
 
     // a template of the piano keyboard item
     // in the animation this item will be cloned with highlighted keys altered
@@ -146,11 +148,14 @@ pub fn midi_visualizer_scene(
         }
         MetricBase::Time => f64::from(scroll_height / scroll_speed),
     };
-    let duration = song.duration() as f64 / time_resolution.get() as f64;
 
     let to_seconds = |time: Metric| time as f64 / time_resolution.get() as f64;
     let to_scene_time =
         |midi_time: Metric| to_seconds(midi_time) + f64::from(buf_time[0]) + scroll_time;
+
+    let music_duration_sec = to_seconds(song.duration());
+    let video_duration_sec =
+        music_duration_sec + f64::from(buf_time[0] + buf_time[1]) + scroll_time;
 
     // let instants = song.instants().collect::<Vec<_>>();
     let text_origin = |n_columns: usize, column: usize| {
@@ -160,32 +165,63 @@ pub fn midi_visualizer_scene(
         frame_bottom_left + dvec3(dx, dy, 1e-4)
     };
 
+    // Static Items
+    //
+    {
+        // Bottom rect for status bar
+        let i_status_bar_rect =
+            Rectangle::from_min_size(frame_bottom_left, dvec2(frame_width, status_bar_height))
+                .with(|item| {
+                    item.set_color(config.status_bar_config.bg_color)
+                        .set_stroke_opacity(0.)
+                        .shift(DVec3::NEG_Z * 1e-4)
+                        .discard()
+                });
+        // top rect for progress bar
+        let i_progress_bar_rect =
+            Rectangle::from_min_size(progress_bar_min, dvec2(frame_width, progress_bar_height))
+                .with(|item| {
+                    item.set_fill_color(config.progress_bar_config.bg_color)
+                        .set_stroke_opacity(0.)
+                        .shift(DVec3::Z * 1e-4)
+                        .discard()
+                });
+
+        macro show_each($($item: expr),*$(,)?) {
+            $(r.play($item.show().with_duration(video_duration_sec));)*
+        }
+        show_each!(i_cam, i_status_bar_rect, i_progress_bar_rect);
+    }
+
     // Progress Bar
     //
-    r.insert_with(|tl| {
-        let progress_bar_setup = |item: &mut Rectangle| {
-            item.set_fill_color(config.progress_bar_config.fg_color)
+    {
+        let fg_color = config.progress_bar_config.fg_color;
+        let progress_bar_setup = move |item: &mut Rectangle| {
+            item.set_fill_color(fg_color)
                 .set_stroke_opacity(0.)
                 .shift(DVec3::Z * 2e-4)
                 .discard()
         };
-        let mut i_progress_bar =
-            Rectangle::from_min_size(progress_bar_min, dvec2(0., progress_bar_height))
-                .with(progress_bar_setup);
-        let i_progress_bar_final =
-            Rectangle::from_min_size(progress_bar_min, dvec2(frame_width, progress_bar_height))
-                .with(progress_bar_setup);
-        tl.forward_to(to_scene_time(0)).play(
-            i_progress_bar
-                .morph_to(i_progress_bar_final)
-                .with_duration(duration)
-                .with_rate_func(linear),
-        );
-    });
+        r.play(seq!().with(|v| {
+            v.forward_to(to_scene_time(0))
+                .push(
+                    (move |t: f64| {
+                        Rectangle::from_min_size(
+                            progress_bar_min,
+                            dvec2(t * frame_width, progress_bar_height),
+                        )
+                        .with(progress_bar_setup)
+                    })
+                    .with_duration(music_duration_sec),
+                )
+                .hold_to(video_duration_sec);
+        }));
+    }
 
     // Timer
     //
-    r.insert_with(|tl| {
+    {
         let origin = text_origin(4, 0);
         let font = font.clone();
         let create_timer_text = move |time: f64| {
@@ -202,28 +238,26 @@ pub fn midi_visualizer_scene(
                 .with_font(font.clone())
                 .with(|item| item.move_anchor_to(Origin, origin).discard())
         };
-
-        let create_timer_text_cloned = create_timer_text.clone();
-        let timer_anim = Func::new(create_timer_text(0.), move |_, t| {
-            let time = t * duration;
-            create_timer_text_cloned(time)
-        });
-
-        tl.play(create_timer_text(0.).show())
-            .forward_to(to_scene_time(0))
-            .play(
-                timer_anim
-                    .into_animation_cell()
-                    .with_duration(duration)
+        let mut seq = seq!(create_timer_text(0.).show().with_duration(to_scene_time(0)));
+        {
+            let create_timer_text = create_timer_text.clone();
+            seq.push(
+                (move |t| create_timer_text(t * music_duration_sec))
+                    .with_duration(music_duration_sec)
                     .with_rate_func(linear),
-            )
-            .play(create_timer_text(duration).show())
-            .forward(buf_time[1].into());
-    });
+            );
+        }
+        seq.push(
+            create_timer_text(music_duration_sec)
+                .show()
+                .with_duration(video_duration_sec - seq.cursor_sec()),
+        );
+        r.play(seq);
+    }
 
     // Note Count
     //
-    r.insert_with(|tl| {
+    {
         let origin = text_origin(4, 1);
         let note_count_total = song.as_unmapped().note_count();
         let create_note_count_text = |n: usize| {
@@ -234,21 +268,24 @@ pub fn midi_visualizer_scene(
         };
 
         let mut i_note_count = create_note_count_text(0);
-        tl.play(i_note_count.show());
+        let mut seq = seq!(i_note_count.show());
+        seq.push(i_note_count.show());
 
         for (time, note_count) in song
             .as_mapped()
             .note_count_iter()
             .map(|(time, note_count)| (to_scene_time(time), note_count))
         {
-            tl.forward_to(time).play(i_note_count.hide());
+            seq.hold_to(time).push(i_note_count.hide());
             i_note_count = create_note_count_text(note_count);
-            tl.play(i_note_count.show());
+            seq.push(i_note_count.show());
         }
-    });
+        seq.hold_to(video_duration_sec);
+        r.play(seq);
+    }
 
     // Note Per Second
-    r.insert_with(|tl| {
+    {
         let origin = text_origin(4, 2);
 
         let note_rate_to_nps = |note_rate: usize| {
@@ -264,21 +301,23 @@ pub fn midi_visualizer_scene(
 
         let mut note_rate_max = 0;
         let mut i_nps_text = create_nps_text(0, 0);
-        tl.play(i_nps_text.show());
+        let mut seq = seq!(i_nps_text.show());
         for (time, nps) in song
             .as_mapped()
             .note_rate_iter(time_window)
             .map(|(time, nps)| (to_scene_time(time), nps))
         {
             note_rate_max = nps.max(note_rate_max);
-            tl.forward_to(time).play(i_nps_text.hide());
+            seq.hold_to(time).push(i_nps_text.hide());
             i_nps_text = create_nps_text(nps, note_rate_max);
-            tl.play(i_nps_text.show());
+            seq.push(i_nps_text.show());
         }
-    });
+        seq.hold_to(video_duration_sec);
+        r.play(seq);
+    }
 
     // Legato Index
-    r.insert_with(|tl| {
+    {
         let legato_score_fn = song.as_mapped().legato_fn(time_window);
         let origin = text_origin(4, 3);
 
@@ -292,35 +331,34 @@ pub fn midi_visualizer_scene(
         };
 
         let i_text = create_legato_text(0.);
-        tl.play(i_text.show());
+        let mut seq = seq!();
         if let Some((&t0, _)) = legato_score_fn.iter().next() {
             // value before `t0` should be 0.
             // because no note is in the window
-            tl.forward_to(to_scene_time(t0)).play(i_text.hide());
+            seq.push(i_text.show().with_duration(to_scene_time(t0)));
             for ((_, &v1), (&t2, &v2)) in legato_score_fn.iter().tuple_windows() {
                 // clone values so that they can be moved into the closure
                 let create_legato_text = create_legato_text.clone();
-
-                let i_text = create_legato_text(v1);
-                let anim = Func::new(i_text, move |_, t| create_legato_text(v1.lerp(&v2, t)));
-
-                tl.play(
-                    anim.into_animation_cell()
-                        // duration calculated by the desired end time minus the current time
-                        // to avoid float accumulation error
-                        .with_duration(to_scene_time(t2) - tl.cur_sec())
+                seq.push(
+                    (move |t| create_legato_text(v1.lerp(&v2, t)))
+                        .with_duration(to_scene_time(t2) - seq.cursor_sec())
                         .with_rate_func(linear),
                 );
             }
-            // value after last note's end passing the window should also be 0.
-            tl.play(i_text.show());
         }
-    });
+        // value after last note's end passing the window should also be 0.
+        seq.push(
+            i_text
+                .show()
+                .with_duration(video_duration_sec - seq.cursor_sec()),
+        );
+        r.play(seq);
+    }
 
     // keyboard animation
-    r.insert_with(|tl| {
+    {
         let mut i_keyboard = i_keyboard_tem.clone();
-        tl.play(i_keyboard.show()).forward(to_scene_time(0));
+        let mut seq = seq!();
 
         for ([staff_idx, voice_idx], ep) in song.as_mapped().note_instants() {
             let NoteInstant {
@@ -329,8 +367,12 @@ pub fn midi_visualizer_scene(
                 pair: (_, note),
             } = ep;
 
-            tl.forward_to(to_scene_time(time));
-            tl.play(i_keyboard.hide());
+            seq.push(
+                i_keyboard
+                    .show()
+                    .with_duration(to_scene_time(time) - seq.cursor_sec()),
+            );
+
             i_keyboard = i_keyboard.with(|item| {
                 let key = note.pitch;
 
@@ -350,9 +392,14 @@ pub fn midi_visualizer_scene(
                     });
                 }
             });
-            tl.play(i_keyboard.show());
         }
-    });
+        seq.push(
+            i_keyboard
+                .show()
+                .with_duration(video_duration_sec - seq.cursor_sec()),
+        );
+        r.play(seq);
+    }
 
     // note animations
 
@@ -380,6 +427,7 @@ pub fn midi_visualizer_scene(
             item.move_to(DVec3::ZERO).scale(scale).move_to(pos);
         };
 
+        let mut seq = seq!();
         match metric_base {
             Time => {
                 let Range {
@@ -388,54 +436,54 @@ pub fn midi_visualizer_scene(
                 } = tick_range;
                 let start_time_unit = song.time_map().eval(&start_tick, true);
                 let end_time_unit = song.time_map().eval(&end_tick, true);
-                r.insert_with(|tl| {
-                    tl.forward_to(buf_time[0].into());
-                    anim_note_by_time(
-                        tl,
-                        &i_keyboard_tem,
-                        note_setup,
-                        pitch,
-                        start_time_unit..end_time_unit,
-                        time_resolution,
-                        scroll_speed.into(),
-                        scroll_height.into(),
-                    );
-                });
+                seq.forward_to(buf_time[0].into());
+                anim_note_by_time(
+                    &mut seq,
+                    &i_keyboard_tem,
+                    note_setup,
+                    pitch,
+                    start_time_unit..end_time_unit,
+                    time_resolution,
+                    scroll_speed.into(),
+                    scroll_height.into(),
+                );
             }
             Beat => {
-                r.insert_with(|tl| {
-                    tl.forward_to(buf_time[0].into());
-                    anim_note_by_beat(
-                        tl,
-                        &i_keyboard_tem,
-                        note_setup,
-                        pitch,
-                        tick_range.clone(),
-                        beat_resolution,
-                        time_resolution,
-                        &song.time_map(),
-                        scroll_speed.into(),
-                        scroll_height.into(),
-                    );
-                });
+                anim_note_by_beat(
+                    &mut seq,
+                    &i_keyboard_tem,
+                    note_setup,
+                    pitch,
+                    tick_range.clone(),
+                    beat_resolution,
+                    time_resolution,
+                    &song.time_map(),
+                    scroll_speed.into(),
+                    scroll_height.into(),
+                );
             }
         }
+        r.play(seq);
     }
 
     // Pedals
-    r.insert_with(|tl| {
+    {
         let mut i_pedals = i_pedals_tem.clone();
-        tl.play(i_pedals.show()).forward(to_scene_time(0));
-
+        let mut seq = seq!();
         for (_, time, control) in song.as_mapped().controls() {
             let pedal_type = Pedal::try_from(control.pedal as u8).expect("should be successful");
-            tl.forward_to(to_scene_time(time)).play(i_pedals.hide());
+            seq.push(
+                i_pedals
+                    .show()
+                    .with_duration(to_scene_time(time) - seq.cursor_sec()),
+            );
             i_pedals = i_pedals.with(|item| {
                 item.set_pedal_status(pedal_type, control.depth.into());
             });
-            tl.play(i_pedals.show());
         }
-    });
+        seq.hold_to(video_duration_sec);
+        r.play(seq);
+    }
 }
 
 pub fn render_midi_visualizer(

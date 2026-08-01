@@ -2,34 +2,24 @@
 
 use std::{iter, ops::Range};
 
-use derive_more::{Deref, DerefMut, From};
 use itertools::Itertools as _;
 use music_utils::is_black_key;
 use ranim::{
     core::{
-        animation::{Eval, StaticAnim as _},
-        timeline::{Timeline, TimelineFunc as _},
+        animation::{AnimSequence, StaticAnim as _},
         traits::{Interpolatable as _, Locate as _, With as _},
     },
     glam::{DVec3, dvec2},
     items::vitem::geometry::Rectangle,
+    prelude::*,
     utils::rate_functions::linear,
 };
 use ranim_music::items::{PianoKeyboard, Tone};
 use tracing::debug;
 use waveform_utils::music::{FrameRate, Metric, TimeMap};
 
-#[derive(Debug, Clone, Copy, Deref, DerefMut, From)]
-pub struct MyAnim<T, F: Fn(f64) -> T>(pub F);
-
-impl<T, F: Fn(f64) -> T> Eval<T> for MyAnim<T, F> {
-    fn eval_alpha(&self, alpha: f64) -> T {
-        (self.0)(alpha)
-    }
-}
-
 pub fn anim_note_by_time(
-    tl: &mut Timeline,
+    seq: &mut AnimSequence,
     keyboard: &PianoKeyboard,
     note_setup: impl 'static + Fn(&mut Rectangle) + Clone,
     pitch: i8,
@@ -61,7 +51,7 @@ pub fn anim_note_by_time(
 
     let scroll_time = scroll_height / scroll_speed;
     let scroll_time_units = time_to_time_unit(scroll_time);
-    let t0 = tl.cur_sec() + scroll_time;
+    let t0 = seq.cursor_sec() + scroll_time;
 
     let note_height = duration * scroll_speed;
 
@@ -76,70 +66,54 @@ pub fn anim_note_by_time(
 
     // Stage 1: note entering scroll area
     {
-        tl.forward_to(t0 + time1);
-        let anim_duration = t0 + time2 - tl.cur_sec();
+        seq.forward_to(t0 + time1);
+        let anim_duration = t0 + time2 - seq.cursor_sec();
         let note_setup = note_setup.clone();
-        let anim = MyAnim(move |alpha| {
+        let anim = move |alpha: f64| {
             let rect_height = scroll_speed * anim_duration * alpha;
             let rect_bottom_left = top - DVec3::Y * rect_height;
             Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, rect_height))
                 .with(&note_setup)
-        });
-        tl.play(
-            anim.into_animation_cell()
-                .with_duration(anim_duration)
-                .with_rate_func(linear),
-        );
+        };
+        seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
     }
 
     if duration_in_time_units <= scroll_time_units
     // Case 1
     // Stage 2: note falling to the bottom of scroll area
     {
-        let anim_duration = t0 + time3 - tl.cur_sec();
+        let anim_duration = t0 + time3 - seq.cursor_sec();
         let note_setup = note_setup.clone();
-        let anim = MyAnim(move |alpha| {
+        let anim = move |alpha| {
             let rect_y_pos = (scroll_height - note_height) * (1. - alpha);
             let rect_bottom_left = origin + DVec3::Y * rect_y_pos;
             Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, note_height))
                 .with(&note_setup)
-        });
-        tl.play(
-            anim.into_animation_cell()
-                .with_duration(anim_duration)
-                .with_rate_func(linear),
-        );
+        };
+        seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
     } else
     // Case 2
     // Stage 2: note occupying the full height of scroll area
     {
         let rect =
             Rectangle::from_min_size(origin, dvec2(key_width, scroll_height)).with(&note_setup);
-        tl.play(rect.show())
-            .forward_to(t0 + time3)
-            .play(rect.hide());
+        seq.push(rect.show()).hold_to(t0 + time3).push(rect.hide());
     }
 
     // Stage 3: note leaving scroll area
     {
-        let anim_duration = t0 + time4 - tl.cur_sec();
+        let anim_duration = t0 + time4 - seq.cursor_sec();
         let note_setup = note_setup.clone();
-        let anim = MyAnim(move |alpha| {
+        let anim = move |alpha| {
             let rect_height = scroll_speed * anim_duration * (1. - alpha);
             Rectangle::from_min_size(origin, dvec2(key_width, rect_height)).with(&note_setup)
-        });
-        tl.play(
-            anim.into_animation_cell()
-                .with_duration(anim_duration)
-                .with_rate_func(linear),
-        );
+        };
+        seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
     }
-
-    tl.hide();
 }
 
 pub fn anim_note_by_beat(
-    tl: &mut Timeline,
+    seq: &mut AnimSequence,
     keyboard: &PianoKeyboard,
     note_setup: impl 'static + Fn(&mut Rectangle) + Clone,
     pitch: i8,
@@ -174,11 +148,11 @@ pub fn anim_note_by_beat(
     let scroll_height_in_ticks = beat_to_tick(scroll_height_in_beats);
 
     // Ensure that all `tl.forward_to()` calls will bring the timeline to a time point after the current moment
-    // (i.e. the result of `tl.cur_sec()` here).
+    // (i.e. the result of `tl.cursor_sec()` here).
     // Notes need time to scroll from the screen top.
     let init_scroll_time_units = -time_map.eval(&-scroll_height_in_ticks, true);
     let init_scroll_time = time_unit_to_time(init_scroll_time_units);
-    let t0 = tl.cur_sec() + init_scroll_time;
+    let t0 = seq.cursor_sec() + init_scroll_time;
 
     let origin = Tone(pitch).locate(keyboard);
     let top = origin + DVec3::Y * scroll_height;
@@ -228,7 +202,7 @@ pub fn anim_note_by_beat(
     let time_unit_4 = time_map.eval(&tick4, true);
 
     let start_time = t0 + time_unit_to_time(time_unit_1);
-    tl.forward_to(start_time);
+    seq.forward_to(start_time);
 
     // Stage 1: note entering scroll area
     {
@@ -238,23 +212,19 @@ pub fn anim_note_by_beat(
         for ((begin_tick, _), (end_tick, end_time_unit)) in points.tuple_windows() {
             // calculate animation duration by subtraction due to possible floating point error
             let end_time = t0 + time_unit_to_time(end_time_unit);
-            let anim_duration = end_time - tl.cur_sec();
+            let anim_duration = end_time - seq.cursor_sec();
             let note_setup = note_setup.clone();
 
-            let anim = MyAnim(move |alpha| {
+            let anim = move |alpha| {
                 let cur_beat = tick_to_beat(begin_tick).lerp(&tick_to_beat(end_tick), alpha);
 
                 let dy = (cur_beat - beat1) * scroll_speed;
                 let rect_bottom_left = top - dy * DVec3::Y;
 
                 Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, dy)).with(&note_setup)
-            });
+            };
 
-            tl.play(
-                anim.into_animation_cell()
-                    .with_duration(anim_duration)
-                    .with_rate_func(linear),
-            );
+            seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
         }
     }
 
@@ -268,10 +238,10 @@ pub fn anim_note_by_beat(
 
         for ((begin_tick, _), (end_tick, end_time_unit)) in points.tuple_windows() {
             let end_time = t0 + time_unit_to_time(end_time_unit);
-            let anim_duration = end_time - tl.cur_sec();
+            let anim_duration = end_time - seq.cursor_sec();
             let note_setup = note_setup.clone();
 
-            let anim = MyAnim(move |alpha| {
+            let anim = move |alpha| {
                 let cur_beat = tick_to_beat(begin_tick).lerp(&tick_to_beat(end_tick), alpha);
 
                 let dy = (cur_beat - beat1) * scroll_speed;
@@ -279,13 +249,9 @@ pub fn anim_note_by_beat(
 
                 Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, note_height))
                     .with(&note_setup)
-            });
+            };
 
-            tl.play(
-                anim.into_animation_cell()
-                    .with_duration(anim_duration)
-                    .with_rate_func(linear),
-            );
+            seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
         }
     } else
     // Case 2
@@ -294,7 +260,7 @@ pub fn anim_note_by_beat(
         let rect =
             Rectangle::from_min_size(origin, dvec2(key_width, scroll_height)).with(&note_setup);
         let end_time = t0 + time_unit_to_time(time_unit_3);
-        tl.play(rect.show()).forward_to(end_time).play(rect.hide());
+        seq.push(rect.show()).forward_to(end_time).push(rect.hide());
     }
 
     // Stage 3: note leaving scroll area
@@ -305,22 +271,16 @@ pub fn anim_note_by_beat(
 
         for ((begin_tick, _), (end_tick, end_time_unit)) in points.tuple_windows() {
             let end_time = time_unit_to_time(end_time_unit);
-            let anim_duration = t0 + end_time - tl.cur_sec();
+            let anim_duration = t0 + end_time - seq.cursor_sec();
             let note_setup = note_setup.clone();
 
-            let anim = MyAnim(move |alpha| {
+            let anim = move |alpha| {
                 let cur_beat = tick_to_beat(begin_tick).lerp(&tick_to_beat(end_tick), alpha);
                 let rect_height = (beat4 - cur_beat) * scroll_speed;
                 Rectangle::from_min_size(origin, dvec2(key_width, rect_height)).with(&note_setup)
-            });
+            };
 
-            tl.play(
-                anim.into_animation_cell()
-                    .with_duration(anim_duration)
-                    .with_rate_func(linear),
-            );
+            seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
         }
     }
-
-    tl.hide();
 }
