@@ -21,5 +21,8 @@ lint: fmt
 test:
 	cargo test --workspace
 
+test-preview *args:
+	cargo run preview "./crates/waveform-utils/src/music/tests/song_2.mid" {{ args }}
+
 test-render *args:
 	cargo run render "./crates/waveform-utils/src/music/tests/song_2.mid" {{ args }}

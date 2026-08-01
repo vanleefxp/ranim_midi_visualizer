@@ -63,9 +63,10 @@ impl PianoPedals {
     }
 
     fn set_item_opacity(&self) {
+        const PEDAL_MAX_OPACIITY: f32 = 0.5;
         if let Some(items) = self.items.borrow_mut().as_mut() {
             for (i, item) in items.iter_mut().enumerate() {
-                item.set_fill_opacity(self.status[i] as f32 / 127. * 0.5);
+                item.set_fill_opacity(self.status[i] as f32 * PEDAL_MAX_OPACIITY);
             }
         }
     }

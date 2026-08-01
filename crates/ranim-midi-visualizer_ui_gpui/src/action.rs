@@ -1,32 +1,23 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use gpui::*;
 use gpui_util::ResultExt;
+use ranim::OutputFormat;
 use tracing::{error, info};
-use waveform_utils::music::parse_midi;
+use waveform_utils::music::{Music, parse_midi};
 
-use crate::state::*;
+use crate::{VisualizerApp, component::playback_control::actions::*, state::*};
 
 actions!(
     file,
     [
         ShowOpenDialog,
+        CloseFile,
         ExportVideo,
         LoadStyle,
         SaveStyle,
         RevertToDefault,
         ClearRecentFiles
-    ]
-);
-actions!(
-    playback,
-    [
-        PlayPause,
-        JumpToStart,
-        JumpToEnd,
-        StepForward,
-        StepBack,
-        ToggleLooping,
     ]
 );
 
@@ -35,20 +26,88 @@ actions!(
 )]
 pub struct OpenFile(pub PathBuf);
 
-pub mod base {
-    use std::path::PathBuf;
+impl VisualizerApp {
+    pub(super) fn action_play_pause(
+        &mut self,
+        _action: &PlayPause,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.playback_state.update(cx, |v, cx| {
+            if v.is_playing() {
+                v.pause(cx);
+            } else {
+                v.play(cx);
+            }
+        })
+    }
 
-    use waveform_utils::music::Metric;
+    pub(super) fn action_jump_to_start(
+        &mut self,
+        _action: &JumpToStart,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.playback_state.update(cx, |v, cx| {
+            v.jump_to_time(0, cx);
+        })
+    }
 
-    use super::*;
+    pub(super) fn action_jump_to_end(
+        &mut self,
+        _action: &JumpToEnd,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.playback_state.update(cx, |v, cx| {
+            v.jump_to_time(v.max_time(), cx);
+        })
+    }
 
-    pub fn open_file(window: &mut Window, cx: &mut App, path: PathBuf) {
+    pub(super) fn action_toggle_looping(
+        &mut self,
+        _action: &ToggleLooping,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.playback_state.update(cx, |v, cx| {
+            v.set_looping(!v.looping(), cx);
+        })
+    }
+
+    pub(super) fn action_step_frame(
+        &mut self,
+        &StepFrame(n): &StepFrame,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.playback_state.update(cx, |v, cx| {
+            v.step_frame(n, cx);
+        });
+    }
+
+    pub fn set_music(&mut self, music: Music, cx: &mut App) {
+        info!(
+            "Music loaded: {} notes, {} time units, time resolution {}.",
+            music.note_count(),
+            music.duration(),
+            music.time_resolution,
+        );
+        self.playback_state.update(cx, |v, cx| {
+            v.pause(cx);
+            v.jump_to_time(0, cx);
+            v.set_max_time(music.duration(), cx);
+            v.set_time_resolution(music.time_resolution, cx);
+        });
+        self.music = Arc::new(music);
+    }
+
+    pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut App) {
         match fs::read(&path).inspect_err(|v| error!("{}", v)) {
             Ok(src) => match parse_midi!(src.as_slice()).inspect_err(|v| error!("{}", v)) {
                 Ok(music) => {
-                    file::add_recent_file(cx, path.clone());
-                    file::set_opened_file(cx, path);
-                    music_data::set_music(cx, music);
+                    self.file_state.set_opened_file(Some(path), cx);
+                    self.set_music(music, cx);
                     window.refresh();
                 }
                 Err(err) => {
@@ -75,13 +134,47 @@ pub mod base {
         }
     }
 
-    pub fn show_open_dialog(window: &mut Window, cx: &mut App) {
+    pub(super) fn action_open_file(
+        &mut self,
+        OpenFile(path): &OpenFile,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_file(path.clone(), window, cx);
+    }
+
+    pub(super) fn action_close_file(
+        &mut self,
+        _action: &CloseFile,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_state.set_opened_file(None, cx);
+        self.set_music(Music::default(), cx);
+    }
+
+    pub(super) fn action_clear_recent_files(
+        &mut self,
+        _action: &ClearRecentFiles,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_state.clear_recent_files(cx);
+    }
+
+    pub(super) fn action_show_open_dialog(
+        &mut self,
+        _action: &ShowOpenDialog,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let ch = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: None,
         });
+        let this = cx.entity();
         window
             .spawn(cx, async move |cx| {
                 match ch.await.anyhow().and_then(|res| res) {
@@ -89,7 +182,7 @@ pub mod base {
                         if let Some(path) = paths.into_iter().next() {
                             info!("Chosen: {}", path.display());
                             cx.update(|window, cx| {
-                                open_file(window, cx, path);
+                                this.update(cx, |v, cx| v.open_file(path, window, cx));
                             })
                             .log_err();
                         } else {
@@ -117,31 +210,12 @@ pub mod base {
             .detach();
     }
 
-    pub fn load_style(_window: &mut Window, _cx: &mut App) {
-        let opened_file = rfd::FileDialog::new()
-            .add_filter("Style config file", &["toml"])
-            .add_filter("All files", &["*"])
-            .pick_file();
-        if let Some(path) = &opened_file {
-            info!("Opened: {}", path.display());
-        } else {
-            info!("No file selected.");
-        }
-    }
-
-    pub fn save_style(_window: &mut Window, _cx: &mut App) {
-        let saved_file = rfd::FileDialog::new()
-            .add_filter("Style config file", &["toml"])
-            .add_filter("All files", &["*"])
-            .save_file();
-        if let Some(path) = &saved_file {
-            info!("Saved: {}", path.display());
-        } else {
-            info!("No file selected.");
-        }
-    }
-
-    pub fn revert_to_default_style(window: &mut Window, cx: &mut App) {
+    pub(super) fn action_revert_to_default_style(
+        &mut self,
+        _action: &RevertToDefault,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let confirmation = window.prompt(
             PromptLevel::Warning,
             "Revert to default style",
@@ -149,11 +223,12 @@ pub mod base {
             &[PromptButton::ok("Yes"), PromptButton::cancel("No")],
             cx,
         );
-        cx.spawn(async |cx| {
+        let this = cx.entity();
+        cx.spawn(async move |_v, cx| {
             if let Some(idx) = confirmation.await.log_err() {
                 if idx == 0 {
                     cx.update(|cx| {
-                        video_config::revert_to_default(cx);
+                        this.update(cx, |v, cx| v.video_config = VideoConfigState::new(cx));
                     });
                 } else {
                     info!("Operation cancelled. Nothing changed.");
@@ -163,98 +238,84 @@ pub mod base {
         .detach();
     }
 
-    fn playback_loop(window: &mut Window, _cx: &mut App) {
-        window.on_next_frame(|window, cx| {
-            if playback::is_playing(cx) {
-                playback::update_playback(cx);
-                playback_loop(window, cx);
-            }
-        });
-        window.refresh();
+    pub(super) fn action_start_export(
+        &mut self,
+        _action: &ExportVideo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let filename = self
+            .video_config
+            .export_config
+            .read(cx)
+            .name
+            .clone()
+            .unwrap_or("video".to_string());
+        let format = self.video_config.export_config.read(cx).format;
+
+        let suggested_name = format!("{}.{}", filename, format);
+        let ch = cx.prompt_for_new_path(std::path::Path::new("./"), Some(suggested_name.as_str()));
+        let this = cx.entity();
+        window
+            .spawn(cx, async move |cx| {
+                match ch.await.anyhow().and_then(|v| v) {
+                    Ok(Some(path)) => {
+                        info!("Export path chosen: {}", path.display());
+                        cx.update(|_window, cx| {
+                            this.update(cx, |v, cx| {
+                                v.video_config.export_config.update(cx, |v, _cx| {
+                                    v.dir = path.parent().map_or_else(
+                                        || "./".to_string(),
+                                        |v| v.display().to_string(),
+                                    );
+                                    let filename = path.file_name().map_or_else(
+                                        || "video".to_string(),
+                                        |v| PathBuf::from(v).display().to_string(),
+                                    );
+                                    match filename.rfind('.') {
+                                        Some(idx) => {
+                                            let (format, strip_ext) = match &filename[idx + 1..] {
+                                                "mp4" => (OutputFormat::Mp4, true),
+                                                "mov" => (OutputFormat::Mov, true),
+                                                "webm" => (OutputFormat::Webm, true),
+                                                "gif" => (OutputFormat::Gif, true),
+                                                _ => (OutputFormat::Mp4, false),
+                                            };
+                                            v.format = format;
+                                            if strip_ext {
+                                                v.name = Some(filename[..idx].to_string());
+                                            } else {
+                                                v.name = Some(filename);
+                                            }
+                                        }
+                                        None => {
+                                            v.name = Some(filename);
+                                        }
+                                    }
+                                });
+                                v.start_export(cx);
+                            });
+                        })
+                        .log_err();
+                    }
+                    Ok(None) => {
+                        info!("No file selected.");
+                    }
+                    Err(err) => {
+                        error!("{}", err);
+                        cx.update(|window, cx| {
+                            drop(window.prompt(
+                                PromptLevel::Critical,
+                                "Error",
+                                Some(err.to_string().as_str()),
+                                &[PromptButton::ok("OK")],
+                                cx,
+                            ));
+                        })
+                        .log_err();
+                    }
+                }
+            })
+            .detach();
     }
-
-    pub fn play(window: &mut Window, cx: &mut App) {
-        playback::play(cx);
-        window.refresh();
-        playback_loop(window, cx);
-    }
-
-    pub fn pause(window: &mut Window, cx: &mut App) {
-        playback::pause(cx);
-        window.refresh();
-    }
-
-    pub fn jump_to_time(window: &mut Window, cx: &mut App, time: Metric) {
-        playback::jump_to_time(cx, time);
-        window.refresh();
-    }
-
-    pub fn toggle_looping(window: &mut Window, cx: &mut App) {
-        cx.update_global::<PlaybackState, _>(|g, _cx| {
-            g.looping = !g.looping;
-            if g.looping {
-                info!("Looping on.");
-            } else {
-                info!("Looping off.")
-            }
-        });
-        window.refresh();
-    }
-
-    pub fn step_frame(window: &mut Window, cx: &mut App, n_frames: isize) {
-        playback::step_frame(cx, n_frames);
-        window.refresh();
-    }
-}
-
-pub fn show_open_dialog(_action: &ShowOpenDialog, window: &mut Window, cx: &mut App) {
-    base::show_open_dialog(window, cx);
-}
-
-pub fn open_file(OpenFile(path): &OpenFile, window: &mut Window, cx: &mut App) {
-    base::open_file(window, cx, path.clone());
-}
-
-pub fn clear_recent_files(_action: &ClearRecentFiles, _window: &mut Window, cx: &mut App) {
-    file::clear_recent_files(cx);
-}
-
-pub fn load_style(_action: &LoadStyle, window: &mut Window, cx: &mut App) {
-    base::load_style(window, cx);
-}
-
-pub fn save_style(_action: &SaveStyle, window: &mut Window, cx: &mut App) {
-    base::save_style(window, cx);
-}
-
-pub fn revert_to_default_style(_action: &RevertToDefault, window: &mut Window, cx: &mut App) {
-    base::revert_to_default_style(window, cx);
-}
-
-pub fn play_pause(_action: &PlayPause, window: &mut Window, cx: &mut App) {
-    if playback::is_playing(cx) {
-        base::pause(window, cx);
-    } else {
-        base::play(window, cx);
-    }
-}
-
-pub fn jump_to_start(_action: &JumpToStart, window: &mut Window, cx: &mut App) {
-    base::jump_to_time(window, cx, 0);
-}
-
-pub fn jump_to_end(_action: &JumpToEnd, window: &mut Window, cx: &mut App) {
-    base::jump_to_time(window, cx, playback::max_time(cx));
-}
-
-pub fn step_forward(_action: &StepForward, window: &mut Window, cx: &mut App) {
-    base::step_frame(window, cx, 1);
-}
-
-pub fn step_back(_action: &StepBack, window: &mut Window, cx: &mut App) {
-    base::step_frame(window, cx, -1);
-}
-
-pub fn toggle_looping(_action: &ToggleLooping, window: &mut Window, cx: &mut App) {
-    base::toggle_looping(window, cx);
 }

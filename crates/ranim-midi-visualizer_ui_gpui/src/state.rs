@@ -1,129 +1,121 @@
-use std::{num::NonZeroUsize, path::PathBuf};
+use std::{
+    num::NonZeroUsize,
+    ops::Deref,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use derivative::Derivative;
-use derive_more::{Deref, DerefMut};
 use gpui::*;
+use gpui_util::ResultExt;
 use indexmap::IndexSet;
-use jiff::{SignedDuration, Timestamp};
 use ranim::Output;
 use ranim_midi_visualizer_lib::config::MidiVisualizerConfig;
-use tracing::info;
-use typed_floats::{self as tf, tf64};
-use waveform_utils::music::{FrameRate, Metric, Music, NoteContainer as _};
+use tracing::{error, info};
+use waveform_utils::{
+    envelope::ExpDecay,
+    synth::{SimpleWaveformSynth, Synth},
+    waveform::Triangle,
+};
+
+#[derive(Derivative)]
+#[derivative(Debug, Clone, Default)]
+pub struct RecentFiles {
+    inner: IndexSet<PathBuf>,
+    #[derivative(Default(value = "Some(64.try_into().unwrap())"))]
+    max_count: Option<NonZeroUsize>,
+}
+
+impl Deref for RecentFiles {
+    type Target = IndexSet<PathBuf>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl RecentFiles {
+    pub fn insert(&mut self, path: PathBuf) {
+        let (idx, inserted) = self.inner.insert_full(path);
+        let len = self.inner.len();
+        if !inserted {
+            self.inner.swap_indices(idx, len - 1);
+        }
+        if let Some(max_count) = self.max_count {
+            let max_count = max_count.get();
+            if len > max_count {
+                self.inner
+                    .drain(..(len - max_count))
+                    .for_each(|v| info!("\"{}\" removed from recent files.", v.display()));
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.inner
+            .drain(..)
+            .for_each(|v| info!("\"{}\" removed from recent files.", v.display()));
+    }
+
+    pub fn iter(&self) -> indexmap::set::Iter<'_, PathBuf> {
+        self.inner.iter()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct FileState {
-    pub opened_file: Entity<Option<PathBuf>>,
-    pub recent_files: Entity<IndexSet<PathBuf>>,
-    pub recent_files_max_count: Option<NonZeroUsize>,
+    opened_file: Entity<Option<PathBuf>>,
+    recent_files: Entity<RecentFiles>,
 }
-
-impl Global for FileState {}
 
 impl FileState {
-    pub fn init(cx: &mut App) {
+    pub fn new(cx: &mut App) -> Self {
         let opened_file = cx.new(|_| None);
-        let recent_files = cx.new(|_| IndexSet::new());
-        cx.set_global(Self {
+        let recent_files = cx.new(|_| RecentFiles::default());
+        Self {
             opened_file,
             recent_files,
-            recent_files_max_count: Some(64.try_into().unwrap()),
-        });
-    }
-}
-
-pub mod file {
-    use crate::menu::update_menus;
-
-    use super::*;
-
-    // pub fn opened_file(cx: &App) -> Entity<Option<PathBuf>> {
-    //     cx.read_global::<FileState, _>(|f, _cx| f.opened_file.clone())
-    // }
-
-    pub fn set_opened_file(cx: &mut App, path: PathBuf) {
-        info!("Opened file: {}", path.display());
-        cx.update_global::<FileState, _>(|g, cx| {
-            g.opened_file = cx.new(|_| Some(path));
-        });
+        }
     }
 
-    pub fn recent_files(cx: &App) -> Entity<IndexSet<PathBuf>> {
-        cx.read_global::<FileState, _>(|f, _cx| f.recent_files.clone())
+    pub fn opened_file(&self) -> Entity<Option<PathBuf>> {
+        self.opened_file.clone()
     }
 
-    // fn update_menu(cx: &mut App) {
-    //     cx.update_jump_list(menus, entries)
-    // }
+    pub fn recent_files(&self) -> Entity<RecentFiles> {
+        self.recent_files.clone()
+    }
 
-    pub fn add_recent_file(cx: &mut App, path: PathBuf) {
-        cx.add_recent_document(&path);
-        cx.update_global::<FileState, _>(|g, cx| {
-            let max_count = g.recent_files_max_count;
-            cx.update_entity(&g.recent_files, |v, _cx| {
-                info!("\"{}\" added to recent files.", path.display());
-                let (idx, inserted) = v.insert_full(path);
-                let len = v.len();
-                if !inserted {
-                    v.swap_indices(idx, len - 1);
-                }
-                if let Some(max_count) = max_count {
-                    let max_count = max_count.get();
-                    if len > max_count {
-                        v.drain(..(len - max_count))
-                            .for_each(|v| info!("\"{}\" removed from recent files.", v.display()));
-                    }
-                }
+    pub fn set_opened_file(&mut self, path: Option<PathBuf>, cx: &mut App) {
+        if let Some(path) = path {
+            info!("\"{}\" opened.", path.display());
+            self.add_recent_file(path.clone(), cx);
+            self.opened_file.update(cx, |v, cx| {
+                *v = Some(path);
+                cx.notify();
             });
-        });
-        update_menus(cx);
-    }
-
-    pub fn clear_recent_files(cx: &mut App) {
-        cx.update_global::<FileState, _>(|g, cx| {
-            cx.update_entity(&g.recent_files, |v, _cx| {
-                v.drain(..)
-                    .for_each(|v| info!("\"{}\" removed from recent files.", v.display()));
+        } else {
+            self.opened_file.update(cx, |v, cx| {
+                *v = None;
+                cx.notify();
             });
+        }
+    }
+
+    pub fn add_recent_file(&mut self, path: PathBuf, cx: &mut App) {
+        self.recent_files.update(cx, |v, cx| {
+            v.insert(path);
+            cx.notify();
         });
-        update_menus(cx);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct MusicDataState {
-    pub music: Entity<Music>,
-}
-
-impl Global for MusicDataState {}
-
-impl MusicDataState {
-    pub fn init(cx: &mut App) {
-        let music = cx.new(|_| Music::default());
-        cx.set_global(Self { music });
-    }
-}
-
-pub mod music_data {
-    use super::*;
-
-    pub fn music(cx: &App) -> Entity<Music> {
-        cx.read_global::<MusicDataState, _>(|g, _cx| g.music.clone())
     }
 
-    pub fn set_music(cx: &mut App, music: Music) {
-        info!(
-            "Music loaded: {} notes, {} time units, time resolution {}.",
-            music.as_unmapped().note_count(),
-            music.duration(),
-            music.time_resolution,
-        );
-        cx.update_global::<MusicDataState, _>(|g, cx| {
-            g.music = cx.new(|_| music);
+    pub fn clear_recent_files(&mut self, cx: &mut App) {
+        self.recent_files.update(cx, |v, cx| {
+            v.clear();
+            cx.notify();
         });
-        playback::refresh(cx);
-        playback::pause(cx);
-        playback::jump_to_time(cx, 0);
     }
 }
 
@@ -131,191 +123,183 @@ pub mod music_data {
 pub struct VideoConfigState {
     pub visualizer_config: Entity<MidiVisualizerConfig>,
     pub export_config: Entity<Output>,
-    pub clear_color: Rgba,
+    pub clear_color: Hsla,
 }
 
 impl Global for VideoConfigState {}
 
 impl VideoConfigState {
-    pub fn init(cx: &mut App) {
-        let visualizer_config = cx.new(|_| MidiVisualizerConfig::default());
-        let export_config = cx.new(|_| Output::default());
-        cx.set_global(Self {
+    pub fn new(cx: &mut App) -> Self {
+        let visualizer_config = cx.new(|_cx| MidiVisualizerConfig::default());
+        let export_config = cx.new(|_cx| Output::default());
+        Self {
             visualizer_config,
             export_config,
-            clear_color: rgb(0x282c34),
-        });
-    }
-}
-
-pub mod video_config {
-    use super::*;
-
-    pub fn visualizer_config(cx: &App) -> Entity<MidiVisualizerConfig> {
-        cx.read_global::<VideoConfigState, _>(|v, _cx| v.visualizer_config.clone())
-    }
-
-    pub fn export_config(cx: &App) -> Entity<Output> {
-        cx.read_global::<VideoConfigState, _>(|v, _cx| v.export_config.clone())
-    }
-
-    pub fn clear_color(cx: &App) -> Rgba {
-        cx.read_global::<VideoConfigState, _>(|v, _cx| v.clear_color)
-    }
-
-    pub fn revert_to_default(cx: &mut App) {
-        info!("Reverted to default style.");
-        VideoConfigState::init(cx);
-        playback::refresh(cx);
-    }
-}
-
-#[derive(Derivative)]
-#[derivative(Debug, Clone, Default)]
-pub struct PlaybackState {
-    #[derivative(Default(value = "1_000_000_000.try_into().unwrap()"))]
-    pub time_resolution: FrameRate,
-    pub time: Metric,
-    pub max_time: Metric,
-    #[derivative(Default(value = "tf::as_const!(StrictlyPositiveFinite, 1f64)"))]
-    pub playback_speed: tf64::StrictlyPositiveFinite,
-    pub play_start_time: Option<Timestamp>,
-    pub looping: bool,
-    #[derivative(Default(value = "60"))]
-    pub stepping_framerate: u32,
-}
-
-impl Global for PlaybackState {}
-
-impl PlaybackState {
-    pub fn init(cx: &mut App) {
-        cx.set_global(Self::default());
-    }
-
-    pub fn is_playing(&self, _cx: &App) -> bool {
-        self.play_start_time.is_some()
-    }
-
-    fn time_unit_to_duration(&self, _cx: &App, time_unit: Metric) -> SignedDuration {
-        SignedDuration::from_secs_f64(time_unit as f64 / self.time_resolution.get() as f64)
-    }
-
-    fn duration_to_time_unit(&self, _cx: &App, duration: SignedDuration) -> Metric {
-        (duration.as_secs_f64() * self.time_resolution.get() as f64) as Metric
-    }
-
-    fn get_play_start_time(&self, cx: &App, time_unit: Metric) -> Timestamp {
-        Timestamp::now()
-            - self
-                .time_unit_to_duration(cx, time_unit)
-                .div_f64(self.playback_speed.into())
-    }
-
-    pub fn play(&mut self, cx: &App) {
-        info!("Start playing...");
-        self.play_start_time = Some(self.get_play_start_time(cx, self.time));
-    }
-
-    pub fn pause(&mut self, _cx: &App) {
-        info!("Paused.");
-        self.play_start_time = None;
-    }
-
-    pub fn jump_to_time(&mut self, cx: &mut App, time: Metric) {
-        info!("Jump to time {}.", time);
-        self.time = time;
-        if self.is_playing(cx) {
-            self.play_start_time = Some(self.get_play_start_time(cx, time));
+            clear_color: rgb(0x282c34).into(),
         }
     }
+}
 
-    pub fn update_playback(&mut self, cx: &mut App) {
-        if let Some(play_start_time) = self.play_start_time {
-            let now = Timestamp::now();
-            let cur_time = now
-                .duration_since(play_start_time)
-                .mul_f64(self.playback_speed.into());
-            let cur_time = self.duration_to_time_unit(cx, cur_time);
-            if cur_time > self.max_time {
-                if self.looping {
-                    self.time = cur_time.rem_euclid(self.max_time)
-                } else {
-                    self.time = self.max_time;
-                    self.pause(cx);
+pub struct DeviceSettings {
+    audio_device: cpal::Device,
+    stream_config: cpal::StreamConfig,
+}
+
+pub enum AudioSignal {
+    DeviceChanged,
+    Paused,
+    Resumed,
+}
+
+pub struct AudioState {
+    device_settings: Option<DeviceSettings>,
+    // playback_task: Option<Task<()>>,
+    pub synth: Arc<Mutex<dyn Synth>>,
+    sender: Option<async_channel::Sender<AudioSignal>>,
+}
+
+pub struct AudioPlayer {
+    stream: cpal::Stream,
+    receiver: async_channel::Receiver<AudioSignal>,
+}
+
+impl FnOnce<()> for AudioPlayer {
+    type Output = ();
+
+    extern "rust-call" fn call_once(self, args: ()) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl FnMut<()> for AudioPlayer {
+    extern "rust-call" fn call_mut(&mut self, args: ()) -> Self::Output {
+        self.call(args)
+    }
+}
+
+impl Fn<()> for AudioPlayer {
+    extern "rust-call" fn call(&self, _args: ()) -> Self::Output {
+        const AUDIO_THREAD_POLL_PERIOD: Duration = Duration::from_nanos(1_000_000_000 / 60);
+        if self.stream.play().log_err().is_some() {
+            {
+                let cur_thread = thread::current();
+                info!(
+                    "Stream started in thread \'{}\' ({})!",
+                    cur_thread.name().unwrap_or("<unknown>"),
+                    cur_thread.id().as_u64(),
+                );
+            }
+            loop {
+                match self.receiver.try_recv() {
+                    Err(_) => {
+                        // No signal passed
+                        thread::sleep(AUDIO_THREAD_POLL_PERIOD);
+                    }
+                    Ok(AudioSignal::DeviceChanged) => {
+                        info!("Playback thread finished due to device change.");
+                        break;
+                    }
+                    Ok(AudioSignal::Paused) => {
+                        info!("Playback stream paused.");
+                        if self.stream.pause().log_err().is_none() {
+                            break;
+                        }
+                    }
+                    Ok(AudioSignal::Resumed) => {
+                        info!("Playback stream resumed.");
+                        if self.stream.play().log_err().is_none() {
+                            break;
+                        }
+                    }
                 }
-            } else {
-                self.time = cur_time;
             }
         }
     }
-
-    pub fn step_frame(&mut self, cx: &mut App, n_frames: isize) {
-        let time_diff = (self.time_resolution.get() as f64 / self.stepping_framerate as f64
-            * n_frames as f64) as Metric;
-        self.jump_to_time(cx, (self.time + time_diff).clamp(0, self.max_time));
-    }
 }
 
-pub mod playback {
-    use super::*;
+impl AudioState {
+    pub fn new() -> Self {
+        let synth = Arc::new(Mutex::new(
+            SimpleWaveformSynth::default()
+                .with_envelope(ExpDecay(1.))
+                .with_waveform(Triangle),
+        ));
+        let mut result = Self {
+            device_settings: None,
+            synth,
+            sender: None,
+        };
 
-    pub fn refresh(cx: &mut App) {
-        cx.update_global::<PlaybackState, _>(|g, cx| {
-            g.time_resolution = cx.read_entity(&music_data::music(cx), |v, _cx| v.time_resolution);
-            g.max_time = cx.read_entity(&music_data::music(cx), |v, _cx| v.duration());
-            g.stepping_framerate = cx.read_entity(&video_config::export_config(cx), |v, _cx| v.fps);
-            info!("Playback data kept up with music and video config.");
+        let host = cpal::default_host();
+        if let Some(device) = host.default_output_device() {
+            result.set_audio_device(device);
+        }
+        result.reload();
+
+        result
+    }
+
+    pub fn set_audio_device(&mut self, device: cpal::Device) {
+        if let Some(sender) = &self.sender {
+            sender.send_blocking(AudioSignal::DeviceChanged).log_err();
+        }
+        let device_settings = if let Some(config) = device.default_output_config().log_err() {
             info!(
-                "Time resolution: {} units per second, max time: {} units, stepping framerate: {} fps",
-                g.time_resolution,
-                g.max_time,
-                g.stepping_framerate
+                "Audio device: {:?}.",
+                device
+                    .description()
+                    .log_err()
+                    .map(|v| v.name().to_string())
+                    .unwrap_or("Unknown device".to_string())
             );
-        });
+            info!("Stream config: {:?}.", config);
+            Some(DeviceSettings {
+                audio_device: device,
+                stream_config: config.into(),
+            })
+        } else {
+            None
+        };
+        self.device_settings = device_settings;
     }
 
-    // pub fn time_resolution(cx: &App) -> FrameRate {
-    //     cx.read_global::<PlaybackState, _>(|v, _cx| v.time_resolution)
-    // }
-
-    pub fn is_playing(cx: &App) -> bool {
-        cx.read_global::<PlaybackState, _>(|g, cx| g.is_playing(cx))
+    pub fn play(&self) {
+        if let Some(sender) = &self.sender {
+            sender.send_blocking(AudioSignal::Resumed).log_err();
+        }
     }
 
-    pub fn time(cx: &App) -> Metric {
-        cx.read_global::<PlaybackState, _>(|g, _cx| g.time)
+    pub fn pause(&self) {
+        if let Some(sender) = &self.sender {
+            sender.send_blocking(AudioSignal::Paused).log_err();
+        }
     }
 
-    pub fn max_time(cx: &App) -> Metric {
-        cx.read_global::<PlaybackState, _>(|g, _cx| g.max_time)
-    }
-
-    pub fn is_looping(cx: &App) -> bool {
-        cx.read_global::<PlaybackState, _>(|g, _cx| g.looping)
-    }
-
-    pub fn play(cx: &mut App) {
-        cx.update_global::<PlaybackState, _>(|g, cx| g.play(cx));
-    }
-
-    pub fn pause(cx: &mut App) {
-        cx.update_global::<PlaybackState, _>(|g, cx| g.pause(cx));
-    }
-
-    pub fn jump_to_time(cx: &mut App, time: Metric) {
-        cx.update_global::<PlaybackState, _>(|g, cx| g.jump_to_time(cx, time));
-    }
-
-    pub fn update_playback(cx: &mut App) {
-        cx.update_global::<PlaybackState, _>(|g, cx| g.update_playback(cx));
-    }
-
-    pub fn step_frame(cx: &mut App, n_frames: isize) {
-        cx.update_global::<PlaybackState, _>(|g, cx| g.step_frame(cx, n_frames));
+    pub fn reload(&mut self) {
+        if let Some(device_settings) = &self.device_settings {
+            let synth = self.synth.clone();
+            let config = device_settings.stream_config.clone();
+            let data_callback = move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let mut synth = synth.lock().unwrap();
+                synth.write_to_buffer(&config, buffer);
+            };
+            let error_callback = |err: cpal::StreamError| {
+                error!("{}", err);
+            };
+            if let Some(stream) = device_settings
+                .audio_device
+                .build_output_stream(
+                    &device_settings.stream_config,
+                    data_callback,
+                    error_callback,
+                    None,
+                )
+                .log_err()
+            {
+                let (sender, receiver) = async_channel::unbounded();
+                self.sender = Some(sender);
+                thread::spawn(AudioPlayer { stream, receiver });
+            }
+        }
     }
 }
-
-#[derive(Debug, Clone, Copy, Deref, DerefMut, Default)]
-pub struct ShouldReloadMenuBar(pub bool);
-
-impl Global for ShouldReloadMenuBar {}
