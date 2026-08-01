@@ -106,6 +106,7 @@ uncased = "0.9.10"
 color = "0.3.2"
 jiff = "0.2.34"
 indexmap = "2.14.0"
+rust-i18n = "4.2.1"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
@@ -134,5 +135,6 @@ features = [
 ]
 
 [patch.crates-io]
-eframe = { git = "https://github.com/emilk/egui", rev = "e73ad83910c04f725b7ff2b363d642face2a4981" }
-egui = { git = "https://github.com/emilk/egui", rev = "e73ad83910c04f725b7ff2b363d642face2a4981" }
+eframe = { git = "https://github.com/emilk/egui" }
+egui = { git = "https://github.com/emilk/egui" }
+# proc-macro-error2 = { git = "https://github.com/gamma0987/proc-macro-error3.git", package = "proc-macro-error3" }

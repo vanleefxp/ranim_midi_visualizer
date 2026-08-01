@@ -10,7 +10,7 @@ use std::{
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use derivative::Derivative;
 use gpui::*;
-use gpui_util::ResultExt;
+use gpui_util::ResultExt as _;
 use indexmap::IndexSet;
 use ranim::Output;
 use ranim_midi_visualizer_lib::config::MidiVisualizerConfig;

@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
 use gpui::*;
-use gpui_util::ResultExt;
+use gpui_util::ResultExt as _;
 use ranim::OutputFormat;
 use tracing::{error, info};
 use waveform_utils::music::{Music, parse_midi};
@@ -114,9 +114,9 @@ impl VisualizerApp {
                     error!("{}", err);
                     drop(window.prompt(
                         PromptLevel::Critical,
-                        "Invalid MIDI file",
+                        &t!("dialog.invalid-midi.title"),
                         Some(err.to_string().as_str()),
-                        &[PromptButton::ok("OK")],
+                        &[PromptButton::ok(t!("dialog.button.ok"))],
                         cx,
                     ));
                 }
@@ -125,9 +125,9 @@ impl VisualizerApp {
                 error!("{}", err);
                 drop(window.prompt(
                     PromptLevel::Critical,
-                    "Failed to open file",
+                    &t!("dialog.failed-open.title"),
                     Some(err.to_string().as_str()),
-                    &[PromptButton::ok("OK")],
+                    &[PromptButton::ok(t!("dialog.ok"))],
                     cx,
                 ));
             }
@@ -197,9 +197,9 @@ impl VisualizerApp {
                         cx.update(|window, cx| {
                             drop(window.prompt(
                                 PromptLevel::Critical,
-                                "Error",
+                                &t!("dialog.error.title"),
                                 Some(err.to_string().as_str()),
-                                &[PromptButton::ok("OK")],
+                                &[PromptButton::ok(t!("dialog.ok"))],
                                 cx,
                             ));
                         })
@@ -218,9 +218,12 @@ impl VisualizerApp {
     ) {
         let confirmation = window.prompt(
             PromptLevel::Warning,
-            "Revert to default style",
-            Some("Are you sure you want to revert to default style?"),
-            &[PromptButton::ok("Yes"), PromptButton::cancel("No")],
+            &t!("dialog.revert.title"),
+            Some(&t!("dialog.revert.message")),
+            &[
+                PromptButton::ok(t!("dialog.revert.yes")),
+                PromptButton::cancel(t!("dialog.revert.no")),
+            ],
             cx,
         );
         let this = cx.entity();
@@ -244,6 +247,10 @@ impl VisualizerApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.export_state.read(cx).is_exporting() {
+            return;
+        }
+
         let filename = self
             .video_config
             .export_config

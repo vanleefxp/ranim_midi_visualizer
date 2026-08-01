@@ -13,6 +13,7 @@ use gpui_component::{
     slider::{Slider, SliderEvent, SliderScale, SliderState, SliderValue},
 };
 use jiff::{SignedDuration, Timestamp};
+use rust_i18n::t;
 use tracing::info;
 use typed_floats::{self as tf, tf64};
 use waveform_utils::music::{FrameRate, Metric};
@@ -52,6 +53,7 @@ pub mod actions {
 
 pub type PlaybackSpeed = tf64::StrictlyPositiveFinite;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum PlaybackEvent {
     /// Start playing.
@@ -60,6 +62,8 @@ pub enum PlaybackEvent {
     Pause,
     /// Stop playing. Starts from blank when playback is resumed.
     Stop,
+    /// Jump to a specific time.
+    Jump { from: Metric, to: Metric },
     /// Indicating that a time range has been played.
     Update(Range<Metric>),
 }
@@ -133,7 +137,9 @@ impl PlaybackStateInner {
 
     pub fn set_playback_speed(&mut self, playback_speed: PlaybackSpeed, cx: &mut Context<Self>) {
         let playing = self.is_playing();
-        self.pause(cx);
+        if playing {
+            self.pause(cx);
+        }
         self.playback_speed = playback_speed;
         cx.emit(PlaybackParamEvent::PlaybackSpeed(playback_speed));
         cx.notify();
@@ -204,7 +210,13 @@ impl PlaybackStateInner {
         if playing {
             self.stop(cx);
         }
+        let from_time = self.cur_time;
         self.cur_time = time;
+        cx.emit(PlaybackEvent::Jump {
+            from: from_time,
+            to: time,
+        });
+        cx.notify();
         if playing {
             self.play(cx);
         }
@@ -226,26 +238,6 @@ impl PlaybackStateInner {
                 }
             } else {
                 let time_range = self.cur_time..cur_time;
-                // cx.read_global::<AudioState, _>(|g, cx| {
-                //     let music = music_data::music(cx);
-                //     for (_, instant) in music.as_mapped().note_instants_during(time_range.clone()) {
-                //         let directive = if instant.is_end {
-                //             NoteDirective::new_off(instant.pair.1.pitch)
-                //         } else {
-                //             NoteDirective {
-                //                 pitch: instant.pair.1.pitch,
-                //                 volume: instant.pair.1.velocity,
-                //             }
-                //         };
-                //         g.synth.lock().unwrap().directive(directive.into());
-                //     }
-                //     for (_, _, &control) in music.as_mapped().controls_during(time_range.clone()) {
-                //         g.synth
-                //             .lock()
-                //             .unwrap()
-                //             .directive(MusicDirective::Control(control));
-                //     }
-                // });
                 self.cur_time = cur_time;
                 cx.emit(PlaybackEvent::Update(time_range));
                 cx.notify();
@@ -310,6 +302,20 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
+const MAX_PLAYBACK_SPEED: f64 = 10.;
+#[inline(always)]
+const fn clamp_playback_speed(value: impl [const] Into<f64>) -> PlaybackSpeed {
+    // SAFETY: strictly positive finite f64 value due to clamping bounds
+    // `Result::unwrap` is not `const fn` so `unsafe` is needed here
+    unsafe {
+        PlaybackSpeed::new_unchecked(
+            value
+                .into()
+                .clamp(MAX_PLAYBACK_SPEED.recip(), MAX_PLAYBACK_SPEED),
+        )
+    }
+}
+
 /// Wrapper for [`PlaybackState`] and its related [`SliderState`] entities.
 #[derive(Debug, Clone)]
 pub struct PlaybackState {
@@ -327,8 +333,6 @@ impl Deref for PlaybackState {
 
 impl PlaybackState {
     pub fn new(cx: &mut App) -> Self {
-        const MAX_PLAYBACK_SPEED: f64 = 8.;
-
         let playback_state = cx.new(|_cx| PlaybackStateInner::default());
         let playback_slider_state = {
             let max_time = playback_state.read(cx).max_time_duration().as_secs_f32();
@@ -376,8 +380,9 @@ impl PlaybackState {
             playback_slider_state.update(cx, |_value, cx| {
                 cx.subscribe(
                     &playback_state,
-                    |slider_state, playback_state, event: &PlaybackEvent, cx| match event {
-                        &PlaybackEvent::Update(Range { end: time, .. }) => {
+                    |slider_state, playback_state, event: &PlaybackEvent, cx| match *event {
+                        PlaybackEvent::Update(Range { start: time, .. })
+                        | PlaybackEvent::Jump { to: time, .. } => {
                             let value = (time as f64
                                 / playback_state.read(cx).time_resolution.get() as f64)
                                 as f32;
@@ -390,15 +395,15 @@ impl PlaybackState {
                 .detach();
                 cx.subscribe(
                     &playback_state,
-                    |slider_state, playback_state, event: &PlaybackParamEvent, cx| match event {
-                        &PlaybackParamEvent::MaxTime(max_time) => {
+                    |slider_state, playback_state, event: &PlaybackParamEvent, cx| match *event {
+                        PlaybackParamEvent::MaxTime(max_time) => {
                             let max_value = (max_time as f64
                                 / playback_state.read(cx).time_resolution.get() as f64)
                                 as f32;
                             *slider_state =
                                 mem::replace(slider_state, SliderState::new()).max(max_value);
                         }
-                        &PlaybackParamEvent::SteppingFramerate(stepping_framerate) => {
+                        PlaybackParamEvent::SteppingFramerate(stepping_framerate) => {
                             let step = (stepping_framerate as f64).recip() as f32;
                             *slider_state =
                                 mem::replace(slider_state, SliderState::new()).step(step);
@@ -412,14 +417,11 @@ impl PlaybackState {
                 cx.subscribe(
                     &playback_state,
                     |slider_state, _playback_state, event: &PlaybackParamEvent, _cx| {
-                        match event {
-                            &PlaybackParamEvent::PlaybackSpeed(playback_speed) => {
-                                // [TODO] `set_value` requires `Window` so use `mem::replace` as a temporary solution
-                                // This should be reported as an issue to `gpui_component`
-                                *slider_state = mem::replace(slider_state, SliderState::new())
-                                    .default_value(f64::from(playback_speed) as f32);
-                            }
-                            _ => (),
+                        if let &PlaybackParamEvent::PlaybackSpeed(playback_speed) = event {
+                            // [TODO] `set_value` requires `Window` so use `mem::replace` as a temporary solution
+                            // This should be reported as an issue to `gpui_component`
+                            *slider_state = mem::replace(slider_state, SliderState::new())
+                                .default_value(f64::from(playback_speed) as f32);
                         }
                     },
                 )
@@ -466,7 +468,7 @@ impl Disableable for PlaybackControl {
 }
 
 impl RenderOnce for PlaybackControl {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let Self {
             state:
                 PlaybackState {
@@ -485,10 +487,16 @@ impl RenderOnce for PlaybackControl {
         let playback_speed = playback_state.read(cx).playback_speed();
 
         let state_id = playback_state.entity_id();
+        let element_id = ElementId::from(("playback_control", state_id));
+        let focus_handle = window
+            .use_keyed_state(element_id.clone(), cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
 
         div()
-            .id(("playback_control", state_id))
+            .id(element_id)
             .key_context(CONTEXT)
+            .when(!disabled, |v| v.track_focus(&focus_handle))
             .h_auto()
             .w_full()
             .flex()
@@ -502,7 +510,11 @@ impl RenderOnce for PlaybackControl {
                         Button::new(("jump_to_start", state_id))
                             .aspect_square()
                             .icon(IconName::ChevronLeft)
-                            .tooltip_with_action("Jump to start", &JumpToStart, Some(CONTEXT))
+                            .tooltip_with_action(
+                                t!("playback.jump-to-start"),
+                                &JumpToStart,
+                                Some(CONTEXT),
+                            )
                             .ghost()
                             .compact()
                             .rounded(ButtonRounded::None)
@@ -517,7 +529,7 @@ impl RenderOnce for PlaybackControl {
                             .aspect_square()
                             .icon(IconName::ChevronLeft)
                             .tooltip_with_action(
-                                "Step back 1 frame",
+                                t!("playback.step-back"),
                                 &StepFrame::BACK,
                                 Some(CONTEXT),
                             )
@@ -537,12 +549,16 @@ impl RenderOnce for PlaybackControl {
                                 is_playing,
                                 |v| {
                                     v.icon(IconName::Pause)
-                                        .tooltip_with_action("Pause", &PlayPause, Some(CONTEXT))
+                                        .tooltip_with_action(
+                                            t!("playback.pause"),
+                                            &PlayPause,
+                                            Some(CONTEXT),
+                                        )
                                         .selected(true)
                                 },
                                 |v| {
                                     v.icon(IconName::Play).tooltip_with_action(
-                                        "Play",
+                                        t!("playback.play"),
                                         &PlayPause,
                                         Some(CONTEXT),
                                     )
@@ -562,7 +578,7 @@ impl RenderOnce for PlaybackControl {
                             .aspect_square()
                             .icon(IconName::ChevronRight)
                             .tooltip_with_action(
-                                "Step forward 1 frame",
+                                t!("playback.step-forward"),
                                 &StepFrame::FORWARD,
                                 Some(CONTEXT),
                             )
@@ -579,7 +595,11 @@ impl RenderOnce for PlaybackControl {
                         Button::new(("jump_to_end", state_id))
                             .aspect_square()
                             .icon(IconName::ChevronRight)
-                            .tooltip_with_action("Jump to end", &JumpToEnd, Some(CONTEXT))
+                            .tooltip_with_action(
+                                t!("playback.jump-to-end"),
+                                &JumpToEnd,
+                                Some(CONTEXT),
+                            )
                             .ghost()
                             .compact()
                             .ghost()
@@ -595,7 +615,7 @@ impl RenderOnce for PlaybackControl {
                         Button::new(("toggle_looping", state_id))
                             .aspect_square()
                             .icon(IconName::LoaderCircle)
-                            .tooltip_with_action("Looping on / off", &ToggleLooping, Some(CONTEXT))
+                            .tooltip_with_action(t!("playback.loop"), &ToggleLooping, Some(CONTEXT))
                             .ghost()
                             .compact()
                             .selected(is_looping)
@@ -629,7 +649,22 @@ impl RenderOnce for PlaybackControl {
                                             });
                                         }
                                     })
-                                    .tooltip("Playback Speed"),
+                                    .on_scroll_wheel({
+                                        let playback_state = playback_state.clone();
+                                        move |event, _window, cx| {
+                                            if let ScrollDelta::Pixels(p) = event.delta {
+                                                let playback_speed_delta = -p.y.to_f64() * 0.005;
+                                                playback_state.update(cx, |v, cx| {
+                                                    let playback_speed = clamp_playback_speed(
+                                                        f64::from(v.playback_speed())
+                                                            + playback_speed_delta,
+                                                    );
+                                                    v.set_playback_speed(playback_speed, cx);
+                                                });
+                                            }
+                                        }
+                                    })
+                                    .tooltip(t!("playback.speed")),
                             )
                             .child(Slider::new(&playback_speed_slider_state).w_48()),
                     ),

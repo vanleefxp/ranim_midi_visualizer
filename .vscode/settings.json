@@ -1,5 +1,9 @@
 {
     "cSpell.words": [
         "rustysynth"
-    ]
+    ],
+    "i18n-ally.localesPaths": [
+        "crates/ranim-midi-visualizer_ui_gpui/locales"
+    ],
+    "i18n-ally.sourceLanguage": "app"
 }

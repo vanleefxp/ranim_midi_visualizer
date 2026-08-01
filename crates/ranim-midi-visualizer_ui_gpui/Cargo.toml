@@ -32,6 +32,7 @@ jiff = { workspace = true }
 indexmap = { workspace = true }
 cpal = { workspace = true }
 async-channel = { workspace = true }
+rust-i18n = { workspace = true }
 
 [dev-dependencies]
 tracing-test = { workspace = true }

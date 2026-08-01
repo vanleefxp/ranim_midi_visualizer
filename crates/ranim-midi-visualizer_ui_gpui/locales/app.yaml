@@ -1,0 +1,145 @@
+_version: 2
+
+menu.file:
+  en: "File"
+  zh-CN: "文件"
+
+menu.file.open:
+  en: "Open"
+  zh-CN: "打开"
+
+menu.file.close:
+  en: "Close"
+  zh-CN: "关闭"
+
+menu.file.recent:
+  en: "Recent files"
+  zh-CN: "最近使用"
+
+menu.file.recent.no-files:
+  en: "(No recent files)"
+  zh-CN: "(无最近文件)"
+
+menu.file.recent.clear:
+  en: "Clear"
+  zh-CN: "清空"
+
+menu.file.export:
+  en: "Export"
+  zh-CN: "导出"
+
+menu.style:
+  en: "Style"
+  zh-CN: "样式"
+
+menu.style.save:
+  en: "Save Style"
+  zh-CN: "保存样式"
+
+menu.style.load:
+  en: "Load Style"
+  zh-CN: "加载样式"
+
+menu.style.revert:
+  en: "Revert to Default"
+  zh-CN: "恢复默认"
+
+playback.play:
+  en: "Play"
+  zh-CN: "播放"
+
+playback.pause:
+  en: "Pause"
+  zh-CN: "暂停"
+
+playback.step-forward:
+  en: "Step forward 1 frame"
+  zh-CN: "前进 1 帧"
+
+playback.step-back:
+  en: "Step back 1 frame"
+  zh-CN: "后退 1 帧"
+
+playback.jump-to-start:
+  en: "Jump to start"
+  zh-CN: "跳转到开头"
+
+playback.jump-to-end:
+  en: "Jump to end"
+  zh-CN: "跳转到结尾"
+
+playback.loop:
+  en: "Looping on / off"
+  zh-CN: "开启 / 关闭循环播放"
+
+playback.speed:
+  en: "Playback speed"
+  zh-CN: "倍速"
+
+export.title:
+  en: "Video Export"
+  zh-CN: "视频导出"
+
+export.preparing:
+  en: "Preparing..."
+  zh-CN: "准备中..."
+
+export.exporting:
+  en: "Exporting"
+  zh-CN: "导出中"
+
+export.progress:
+  en: ": %{completed_frames} / %{total_frames} frames (%{percentage}%)"
+  zh-CN: ": %{completed_frames} / %{total_frames} 帧 (%{percentage}%)"
+
+export.complete:
+  en: "Export complete!"
+  zh-CN: "导出完成！"
+
+export.error:
+  en: "Error"
+  zh-CN: "错误"
+
+dialog.button.yes:
+  en: "Yes"
+  zh-CN: "是"
+
+dialog.button.no:
+  en: "No"
+  zh-CN: "否"
+
+dialog.button.ok:
+  en: "OK"
+  zh-CN: "确定"
+
+dialog.button.cancel:
+  en: "Cancel"
+  zh-CN: "取消"
+
+dialog.invalid-midi.title:
+  en: "Invalid MIDI file"
+  zh-CN: "无效的 MIDI 文件"
+
+dialog.failed-open.title:
+  en: "Failed to open file"
+  zh-CN: "打开文件失败"
+
+dialog.error.title:
+  en: "Error"
+  zh-CN: "错误"
+
+dialog.revert.title:
+  en: "Revert to default style"
+  zh-CN: "恢复默认样式"
+
+dialog.revert.message:
+  en: "Are you sure you want to revert to default style? All unsaved changes will be lost!"
+  zh-CN: "确定要恢复默认样式吗？未保存的更改将会丢失！"
+
+app.title:
+  en: "Ranim MIDI Visualizer"
+  zh-CN: "Ranim MIDI 可视化工具"
+
+export.default-name:
+  en: "video"
+  zh-CN: "视频"
