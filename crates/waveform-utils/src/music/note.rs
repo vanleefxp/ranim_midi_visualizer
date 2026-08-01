@@ -12,3 +12,12 @@ pub struct Note<Pitch = i8> {
     // /// A slight offset from the standard start and end positions of the note.
     // pub offset: [Metric; 2],
 }
+
+impl<Pitch> Note<Pitch> {
+    pub fn new_off(pitch: Pitch) -> Self {
+        Note {
+            pitch,
+            velocity: 0.0.try_into().unwrap(),
+        }
+    }
+}

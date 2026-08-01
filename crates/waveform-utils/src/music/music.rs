@@ -7,6 +7,8 @@ use derivative::Derivative;
 use ranim_midi_visualizer_math::func::{LadderFn, SegmentedLinearFn};
 use tracing::info;
 
+use crate::music::NoteContainer;
+
 use super::{
     DEFAULT_BEAT_RESOLUTION, FrameRate, MappedControlContainer, MappedNoteContainer,
     MappedNoteControlContainer, Metric, RawMusic, TimeMap, control::PedalControl,
@@ -123,6 +125,10 @@ impl<Pitch, Control> Music<Pitch, Control> {
 
     pub fn beat_resolution(&self) -> FrameRate {
         self.inner.resolution
+    }
+
+    pub fn note_count(&self) -> usize {
+        self.inner.note_count()
     }
 
     pub fn as_unmapped(&self) -> &RawMusic<Pitch, Control> {

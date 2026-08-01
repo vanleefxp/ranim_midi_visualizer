@@ -5,15 +5,16 @@ use std::{
 };
 
 use cpal::{FromSample, Sample, SizedSample};
+use derivative::Derivative;
 use flagset::{FlagSet, flags};
 
 use super::Synth;
 use crate::{
-    envelope::{Envelope, ExpDecay},
+    envelope::{Envelope, NoEnvelope},
     freq::ToFrequency,
-    music::Pedal,
-    synth::{MusicDirective, NoteDirective, SynthSample},
-    waveform::{Triangle, Waveform},
+    music::{Note, Pedal},
+    synth::MusicDirective,
+    waveform::{Sine, Waveform},
 };
 
 flags! {
@@ -56,44 +57,52 @@ struct NoteState {
 }
 
 /// A simple waveform synthesizer.
-#[derive(Clone)]
-pub struct SimpleWaveformSynth<Note = i8> {
-    stream_config: cpal::StreamConfig,
+#[derive(Derivative)]
+#[derivative(Clone, Default)]
+pub struct SimpleWaveformSynth<Pitch = i8> {
     /// The currently active waveform. Will be used for the next triggered note.
+    #[derivative(Default(value = "Arc::new(Sine)"))]
     pub waveform: Arc<dyn Waveform + Send + Sync>,
     /// The currently active envelope. Will be used for the next triggered note.
+    #[derivative(Default(value = "Arc::new(NoEnvelope)"))]
     pub envelope: Arc<dyn Envelope + Send + Sync>,
     /// The maximum volume of a single note.
     /// This allows multiple notes to play simultaneously without overflowing the audio device's maximum volume.
+    #[derivative(Default(value = "0.125"))]
     pub note_max_volume: f64,
     /// Currently sounding notes.
-    note_states: HashMap<Note, NoteState>,
-    pressed_notes: HashSet<Note>,
-    sustain_notes: HashSet<Note>,
-    /// Time (in seconds) since the first note of the currently sounding notes has been triggered.
+    note_states: HashMap<Pitch, NoteState>,
+    /// Manually pressed notes (not including those kept by pedals).
+    pressed_notes: HashSet<Pitch>,
+    sustain_notes: HashSet<Pitch>,
     paused: bool,
+    /// Whether the three pedals are currently pressed.
     pedal_state: FlagSet<PedalState>,
+    /// Time (in seconds) since the first note of the currently sounding notes has been triggered.
     time: f64,
+}
+
+impl<Note> SimpleWaveformSynth<Note> {
+    pub fn with_waveform(mut self, waveform: impl Waveform + Send + Sync) -> Self {
+        self.waveform = Arc::new(waveform);
+        self
+    }
+
+    pub fn with_envelope(mut self, envelope: impl Envelope + Send + Sync) -> Self {
+        self.envelope = Arc::new(envelope);
+        self
+    }
+
+    pub fn with_note_max_volume(mut self, note_max_volume: f64) -> Self {
+        self.note_max_volume = note_max_volume;
+        self
+    }
 }
 
 impl<Note> SimpleWaveformSynth<Note>
 where
     Note: ToFrequency + Hash + Eq + Send + Sync + Clone,
 {
-    pub fn from_stream_config(stream_config: cpal::StreamConfig) -> Self {
-        Self {
-            stream_config,
-            waveform: Arc::new(Triangle),
-            envelope: Arc::new(ExpDecay(1.)),
-            note_max_volume: 0.125,
-            note_states: Default::default(),
-            pressed_notes: Default::default(),
-            sustain_notes: Default::default(),
-            paused: false,
-            pedal_state: Default::default(),
-            time: 0.,
-        }
-    }
     /// Trigger a note with the given volume.
     pub fn attack(&mut self, note: Note, volume: f64) {
         if self.pedal_state.contains(PedalState::Sustain) {
@@ -139,6 +148,7 @@ where
         self.pressed_notes.clear();
         self.sustain_notes.clear();
         self.time = 0.0;
+        self.pedal_state = FlagSet::empty();
     }
 
     /// Pause the playback. All currently sounding notes will continue to sound when [`Synth::play`] is called.
@@ -210,7 +220,7 @@ where
 }
 
 impl<Note: ToFrequency> SimpleWaveformSynth<Note> {
-    fn calc(&self, t: f64) -> SynthSample {
+    fn calc(&self, t: f64) -> f64 {
         let mut val = 0.0;
         for (tone, note_state) in &self.note_states {
             let t = t - note_state.trigger_time;
@@ -223,7 +233,7 @@ impl<Note: ToFrequency> SimpleWaveformSynth<Note> {
             let waveform_val = note_state.waveform.eval_cyc(t * freq);
             val += note_state.volume * envelope_val * waveform_val;
         }
-        (val * self.note_max_volume).clamp_magnitude(1.0) as SynthSample
+        (val * self.note_max_volume).clamp_magnitude(1.)
     }
 
     pub fn active_notes<'a>(&'a self) -> impl Iterator<Item = &'a Note>
@@ -234,22 +244,21 @@ impl<Note: ToFrequency> SimpleWaveformSynth<Note> {
     }
 }
 
-impl<Note, Sample> Synth<MusicDirective<Note>, Sample> for SimpleWaveformSynth<Note>
+impl<Pitch, Sample> Synth<MusicDirective<Pitch>, Sample> for SimpleWaveformSynth<Pitch>
 where
-    Note: ToFrequency + Hash + Eq + Send + Sync + Clone + 'static,
-    Sample: SizedSample + FromSample<SynthSample>,
+    Pitch: ToFrequency + Hash + Eq + Send + Sync + Clone + 'static,
+    Sample: SizedSample + FromSample<f64>,
 {
-    fn directive(&mut self, directive: MusicDirective<Note>) {
-        use MusicDirective::*;
+    fn directive(&mut self, directive: MusicDirective<Pitch>) {
         match directive {
-            Note(NoteDirective { pitch, volume }) => {
-                if volume > 0. {
-                    self.attack(pitch, volume.into());
+            MusicDirective::Note(Note { pitch, velocity }) => {
+                if velocity > 0. {
+                    self.attack(pitch, velocity.into());
                 } else {
                     self.release(&pitch);
                 }
             }
-            Control(control) => {
+            MusicDirective::Control(control) => {
                 use Pedal::*;
                 let is_on = control.depth > 0.;
                 match control.pedal {
@@ -270,23 +279,19 @@ where
                     _ => (),
                 }
             }
-            PlayPause(is_play) => {
-                if is_play {
-                    self.play();
-                } else {
-                    self.pause();
-                }
-            }
-            Stop => self.stop(),
+            MusicDirective::Play => self.play(),
+            MusicDirective::Pause => self.pause(),
+            MusicDirective::Stop => self.stop(),
             // _ => (),
         }
     }
 
-    fn write_to_buffer(&mut self, buffer: &mut [Sample]) {
+    fn write_to_buffer(&mut self, config: &cpal::StreamConfig, buffer: &mut [Sample]) {
+        const MIN_VOLUME: f64 = 1e-7;
+
         if self.paused {
-            buffer.fill(0.0.to_sample());
+            buffer.fill(0.0f64.to_sample());
         } else {
-            let config = &self.stream_config;
             let n_channels = config.channels as usize;
             let sample_rate = config.sample_rate;
             let sample_count = buffer.len() / n_channels;
@@ -299,14 +304,17 @@ where
                 buffer[(i * n_channels)..((i + 1) * n_channels)].fill(value.to_sample());
             }
 
-            // delete notes that has already stopped
+            // delete notes that has already stopped or are too quiet
             self.note_states.retain(|_, note_state| {
                 let &mut NoteState {
                     is_on,
                     trigger_time,
+                    volume,
                     ..
                 } = note_state;
-                is_on || trigger_time + note_state.envelope.release_time() > self.time
+                is_on
+                    || trigger_time + note_state.envelope.release_time() > self.time
+                    || volume > MIN_VOLUME
             });
 
             // reset time if no note is currently playing
