@@ -6,6 +6,9 @@
     const_trait_impl,
     const_convert
 )]
+// [FIXME] Stack overflow for no reason.
+// This crate cannot be used
+// UI might be reconstructed using Qt in the future
 
 #[macro_use]
 extern crate rust_i18n;
@@ -16,6 +19,7 @@ mod state;
 mod utils;
 
 use std::{
+    mem,
     ops::Range,
     panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
@@ -26,7 +30,18 @@ use std::{
 
 use gpui::{prelude::*, *};
 use gpui_component::{
-    ActiveTheme as _, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode, ThemeRegistry, button::Button, label::Label, menu::AppMenuBar, progress::Progress, resizable::{h_resizable, resizable_panel}, v_flex,
+    ActiveTheme as _, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode,
+    ThemeRegistry,
+    accordion::Accordion,
+    button::Button,
+    form::{field, h_form},
+    label::Label,
+    menu::AppMenuBar,
+    progress::Progress,
+    resizable::{h_resizable, resizable_panel},
+    scroll::ScrollableElement,
+    status_bar::StatusBar,
+    v_flex,
 };
 use gpui_util::ResultExt as _;
 use ranim::{
@@ -260,6 +275,13 @@ impl Render for VisualizerApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // DockArea::new("dock_area", None, window, cx)
         // TabPanel::
+        let opened_filename = self
+            .file_state
+            .opened_file()
+            .read(cx)
+            .as_ref()
+            .map(|v| v.file_name())
+            .flatten();
 
         let preview_div = v_flex()
             .size_full()
@@ -282,38 +304,56 @@ impl Render for VisualizerApp {
             );
 
         v_flex()
-        .size_full()
-        .child(
-            div()
+            .size_full()
+            .child(
+                div()
                     .h_auto()
                     .child(self.menu_bar.clone())
                     .border_b_1()
-                    .border_color(cx.theme().border)
-        ).child(
-            div().flex_grow_1()
-            .w_full()
-            .child(
-                h_resizable("visualizer_app_main")
-                .child(preview_div.into_any_element())
-                .child(
-                    resizable_panel()
-                    .size(px(400.))
-                    .min_size(px(100.))
-                    .max_size(px(600.))
-                )
+                    .border_color(cx.theme().border),
             )
-        )
-        .on_action(cx.listener(Self::action_show_open_dialog))
-        .on_action(cx.listener(Self::action_open_file))
-        .on_action(cx.listener(Self::action_close_file))
-        .on_action(cx.listener(Self::action_revert_to_default_style))
-        .on_action(cx.listener(Self::action_clear_recent_files))
-        .on_action(cx.listener(Self::action_play_pause))
-        .on_action(cx.listener(Self::action_jump_to_start))
-        .on_action(cx.listener(Self::action_jump_to_end))
-        .on_action(cx.listener(Self::action_toggle_looping))
-        .on_action(cx.listener(Self::action_step_frame))
-        .on_action(cx.listener(Self::action_start_export))
+            .child(
+                div().flex_grow_1().w_full().child(
+                    h_resizable("visualizer_app_main")
+                        .child(preview_div.into_any_element())
+                        .child(
+                            resizable_panel()
+                                .size(px(400.))
+                                .size_range(px(100.)..px(600.))
+                                .child(
+                                    v_flex()
+                                        .size_full()
+                                        .overflow_y_scrollbar()
+                                        .child(VideoConfigForm),
+                                ),
+                        ),
+                ),
+            )
+            .child({
+                let mut status_bar = StatusBar::new();
+                if let Some(filename) = opened_filename {
+                    status_bar = status_bar.left(
+                        Label::new(filename.display().to_string())
+                            .font_family(&cx.theme().mono_font_family)
+                            .text_color(cx.theme().muted_foreground),
+                    );
+                } else {
+                    status_bar = status_bar.left(t!("status.open-file"));
+                }
+
+                status_bar
+            })
+            .on_action(cx.listener(Self::action_show_open_dialog))
+            .on_action(cx.listener(Self::action_open_file))
+            .on_action(cx.listener(Self::action_close_file))
+            .on_action(cx.listener(Self::action_revert_to_default_style))
+            .on_action(cx.listener(Self::action_clear_recent_files))
+            .on_action(cx.listener(Self::action_play_pause))
+            .on_action(cx.listener(Self::action_jump_to_start))
+            .on_action(cx.listener(Self::action_jump_to_end))
+            .on_action(cx.listener(Self::action_toggle_looping))
+            .on_action(cx.listener(Self::action_step_frame))
+            .on_action(cx.listener(Self::action_start_export))
     }
 }
 
@@ -587,6 +627,62 @@ impl VisualizerApp {
     }
 }
 
+#[derive(IntoElement)]
+pub struct VideoConfigForm;
+
+impl RenderOnce for VideoConfigForm {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        // let mut elem = Accordion::new("config_playback")
+        //     .multiple(true)
+        //     .bordered(false)
+        //     .item(|item| {
+        //         item.title("Playback").open(true).child(
+        //             h_form()
+        //                 .child(field().label("Video resolution"))
+        //                 .child(field().label("Output FPS"))
+        //                 .child(field().label("Note scroll speed"))
+        //                 .child(field().label("Time window")),
+        //         )
+        //     })
+        //     .item(|item| {
+        //         item.title("Colors")
+        //             .icon(IconName::Palette)
+        //             .open(true)
+        //             .child(
+        //                 h_form()
+        //                     .child(field().label("Clear color"))
+        //                     .child(field().label("Note colors"))
+        //                     .child(field().label("Note colors by"))
+        //                     .child(field().label("Key colors"))
+        //                     .child(field().label("Status bar colors"))
+        //                     .child(field().label("Progress bar colors")),
+        //             )
+        //     })
+        //     .item(|item| {
+        //         item.title("Size").open(true).child(
+        //             h_form()
+        //                 .child(field().label("Key size"))
+        //                 .child(field().label("Black key offset"))
+        //                 .child(field().label("Note horizontal scale"))
+        //                 .child(field().label("Status bar padding"))
+        //                 .child(field().label("Status bar font size"))
+        //                 .child(field().label("Progress bar height")),
+        //         )
+        //     })
+        //     .into_any_element();
+
+        // if let Some(elem) = elem.downcast_mut::<Div>() {
+        //     // Hack to set the accordion's height to auto
+        //     // This is because `Accordion` doesn't implement `Styled`
+        //     *elem = mem::replace(elem, div()).w_full().h_auto();
+        // }
+
+        // elem
+
+        Empty
+    }
+}
+
 fn key_bindings() -> Vec<KeyBinding> {
     vec![
         KeyBinding::new("ctrl-o", ShowOpenDialog, None),
@@ -597,7 +693,7 @@ fn key_bindings() -> Vec<KeyBinding> {
 pub fn run_app() {
     rust_i18n::extend!(gpui_component);
     gpui_platform::application()
-        .with_assets(gpui_component_assets::Assets)
+        .with_assets(gpui_kit_assets::Assets)
         .run(move |cx| {
             gpui_component::init(cx);
             component::init(cx);

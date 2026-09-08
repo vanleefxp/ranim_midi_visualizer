@@ -82,6 +82,7 @@ fn main() -> Result<()> {
         .arg(arg!(--scroll_speed <FLOAT> "Note scroll speed in coordinate units per second. By default the screen height is 8 coordinate units.").default_value("2"))
         .arg(arg!(--buf_time <VALUE> "Additional time before and after playing the song.").value_names(["BEFORE", "AFTER"]).default_values(["2", "2"]).num_args(1..=2))
     };
+    let mut cmd = command!();
 
     let mut cmd_render = Command::new("render");
     cmd_render = add_common_args(cmd_render);
@@ -89,17 +90,22 @@ fn main() -> Result<()> {
     .arg(arg!(-f --format <VALUE> "Output video format. Supported values are: mp4, mov, webm, gif.").default_value("mp4"))
     .arg(arg!(--fps <INT> "Frame rate of the output.").default_value("60"))
     .arg(arg!(buffer_count: --buf <INT> "Buffer count used for multiple buffering.").default_value("2"));
+    cmd = cmd.subcommand(cmd_render);
 
-    let mut cmd_preview = Command::new("preview");
-    cmd_preview = add_common_args(cmd_preview);
+    if cfg!(feature = "preview") {
+        let mut cmd_preview = Command::new("preview");
+        cmd_preview = add_common_args(cmd_preview);
+        cmd = cmd.subcommand(cmd_preview);
+    }
 
-    let cmd = command!().subcommand(cmd_render).subcommand(cmd_preview);
-
-    match cmd.get_matches().subcommand() {
+    match cmd.get_matches_mut().subcommand() {
         Some(("render", matches)) => render(matches),
-        Some(("preview", matches)) => preview(matches),
+        Some(("preview", matches)) if cfg!(feature = "preview") => preview(matches),
         _ => {
+            #[cfg(feature = "ui")]
             ui();
+            #[cfg(not(feature = "ui"))]
+            cmd.print_long_help()?;
             Ok(())
         }
     }
@@ -139,7 +145,7 @@ fn get_note_config(matches: &ArgMatches) -> Result<NoteConfig> {
     let color_by = {
         use ColorBy::*;
         let color_by = matches.get_one::<String>("color_by").unwrap();
-        if color_by == "channel" || color_by == "Voice" {
+        if color_by == "channel" || color_by == "voice" {
             Voice
         } else if color_by == "track" || color_by == "staff" {
             Staff
@@ -249,6 +255,7 @@ fn render(matches: &ArgMatches) -> Result<()> {
 
     let output = Output {
         name: None,
+        name_template: None,
         fps: matches.get_one::<String>("fps").unwrap().parse()?,
         dir: ".".to_string(),
         width,
@@ -287,10 +294,8 @@ fn preview(matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ui")]
 fn ui() {
-    // use ranim_midi_visualizer_ui::{MidiVisualizerApp, run_app};
-    // let app = MidiVisualizerApp::default();
-    // run_app(app);
     use ranim_midi_visualizer_ui_gpui::run_app;
     run_app();
 }

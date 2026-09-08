@@ -44,6 +44,10 @@ menu.style.revert:
   en: "Revert to Default"
   zh-CN: "恢复默认"
 
+status.open-file:
+  en: "Open a MIDI file to start visualization."
+  zh-CN: "打开一个 MIDI 文件以进行可视化。"
+
 playback.play:
   en: "Play"
   zh-CN: "播放"

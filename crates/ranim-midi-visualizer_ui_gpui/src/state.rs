@@ -126,8 +126,6 @@ pub struct VideoConfigState {
     pub clear_color: Hsla,
 }
 
-impl Global for VideoConfigState {}
-
 impl VideoConfigState {
     pub fn new(cx: &mut App) -> Self {
         let visualizer_config = cx.new(|_cx| MidiVisualizerConfig::default());

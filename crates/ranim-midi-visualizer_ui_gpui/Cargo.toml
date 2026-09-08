@@ -12,7 +12,7 @@ gpui = { workspace = true }
 gpui_util = { workspace = true }
 gpui_platform = { workspace = true }
 gpui-component = { workspace = true }
-gpui-component-assets = { workspace = true }
+gpui-kit-assets = { workspace = true }
 rfd = { workspace = true }
 dark-light = { workspace = true }
 

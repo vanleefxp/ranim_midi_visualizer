@@ -257,7 +257,7 @@ impl VisualizerApp {
             .read(cx)
             .name
             .clone()
-            .unwrap_or("video".to_string());
+            .unwrap_or_else(|| t!("export.default-name").into_owned());
         let format = self.video_config.export_config.read(cx).format;
 
         let suggested_name = format!("{}.{}", filename, format);
@@ -276,7 +276,7 @@ impl VisualizerApp {
                                         |v| v.display().to_string(),
                                     );
                                     let filename = path.file_name().map_or_else(
-                                        || "video".to_string(),
+                                        || t!("export.default-name").to_string(),
                                         |v| PathBuf::from(v).display().to_string(),
                                     );
                                     match filename.rfind('.') {
@@ -313,9 +313,9 @@ impl VisualizerApp {
                         cx.update(|window, cx| {
                             drop(window.prompt(
                                 PromptLevel::Critical,
-                                "Error",
+                                &t!("dialog.error.title"),
                                 Some(err.to_string().as_str()),
-                                &[PromptButton::ok("OK")],
+                                &[PromptButton::ok(t!("dialog.ok"))],
                                 cx,
                             ));
                         })

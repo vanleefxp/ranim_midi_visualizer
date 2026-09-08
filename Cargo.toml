@@ -22,15 +22,19 @@ tracing-subscriber = { workspace = true }
 phf = { workspace = true }
 uncased = { workspace = true }
 color = { workspace = true }
-eframe = { workspace = true }
 ranim-midi-visualizer_lib = { workspace = true }
 waveform-utils = { workspace = true }
 typed_floats = { workspace = true }
-ranim-midi-visualizer_ui_gpui = { workspace = true }
+ranim-midi-visualizer_ui_gpui = { workspace = true, optional = true }
 
 [dependencies.clap]
 version = "4.5.57"
 features = ["cargo", "color"]
+
+[features]
+default = ["preview"]
+preview = []
+ui = ["dep:ranim-midi-visualizer_ui_gpui"]
 
 [workspace]
 members = [
@@ -45,19 +49,13 @@ members = [
 ]
 
 [workspace.dependencies]
-eframe = "0.35"
-egui_dock = { git = "https://github.com/anhosh/egui_dock.git" }
-egui-phosphor = { git = "https://github.com/amPerl/egui-phosphor.git", rev = "5a0075f68a463f6b316d39776fff519a2762b729" }
+gpui = { package = "gpui-pre", version = "0.3.1" }
+gpui_platform = { package = "gpui-pre-platform", version = "0.3.1", features = ["font-kit"] }
+gpui_util = { package = "gpui-pre-util", version = "0.3.1" }
+gpui-component = "0.6.0"
+gpui-kit-assets = "0.6.0"
 
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_util = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
-    "font-kit",
-] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component" }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
-
-dark-light = { git = "https://github.com/rust-dark-light/dark-light.git" }
+dark-light = "3.0.0"
 
 tracing = "0.1.44"
 tracing-indicatif = "0.3.14"
@@ -107,15 +105,18 @@ color = "0.3.2"
 jiff = "0.2.34"
 indexmap = "2.14.0"
 rust-i18n = "4.2.1"
+stacker = "0.1.25"
 
 [workspace.dependencies.ranim]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
+rev = "3cb43c0d5dc70e901060f431540c67e60c1ba093"
 features = ["preview", "render", "typst"]
 
 [workspace.dependencies.ranim-macros]
 git = "https://github.com/AzurIce/ranim.git"
 # git = "https://github.com/vanleefxp/ranim_fork.git"
+rev = "3cb43c0d5dc70e901060f431540c67e60c1ba093"
 
 [workspace.dependencies.ranim-midi-visualizer_lib]
 path = "crates/ranim-midi-visualizer_lib"
@@ -123,18 +124,10 @@ features = ["serde"]
 
 [workspace.dependencies.derive_more]
 version = "2.1.1"
-features = [
-    "deref",
-    "deref_mut",
-    "index",
-    "index_mut",
-    "into_iterator",
-    "from",
-    "into",
-    "display",
-]
+features = ["full"]
 
 [patch.crates-io]
-eframe = { git = "https://github.com/emilk/egui" }
-egui = { git = "https://github.com/emilk/egui" }
+eframe = { git = "https://github.com/emilk/egui", rev = "f2de65f636cdc7bbf662b4a5482f1385ce2a0bb9" }
+egui = { git = "https://github.com/emilk/egui", rev = "f2de65f636cdc7bbf662b4a5482f1385ce2a0bb9" }
+egui-phosphor = { git = "https://github.com/amPerl/egui-phosphor", rev = "d392183fe3766d49a78e4fce249e73777985119a" }
 # proc-macro-error2 = { git = "https://github.com/gamma0987/proc-macro-error3.git", package = "proc-macro-error3" }

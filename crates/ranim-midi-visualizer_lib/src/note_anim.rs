@@ -6,10 +6,10 @@ use itertools::Itertools as _;
 use music_utils::is_black_key;
 use ranim::{
     core::{
-        animation::{AnimSequence, StaticAnim as _},
+        animation::{StaticAnim as _, sequence::AnimSequence},
         traits::{Interpolatable as _, Locate as _, With as _},
     },
-    glam::{DVec3, dvec2},
+    glam::{DVec3, dvec3},
     items::vitem::geometry::Rectangle,
     prelude::*,
     utils::rate_functions::linear,
@@ -69,12 +69,15 @@ pub fn anim_note_by_time(
         seq.forward_to(t0 + time1);
         let anim_duration = t0 + time2 - seq.cursor_sec();
         let note_setup = note_setup.clone();
-        let anim = move |alpha: f64| {
+        let anim = Pure(move |alpha: f64| {
             let rect_height = scroll_speed * anim_duration * alpha;
-            let rect_bottom_left = top - DVec3::Y * rect_height;
-            Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, rect_height))
-                .with(&note_setup)
-        };
+            Rectangle::new(key_width, rect_height)
+                .transformed(Translation::identity())
+                .with(|item| {
+                    item.move_anchor_to(AabbPoint(dvec3(-1., 1., 0.)), top);
+                    note_setup(&mut item.inner);
+                })
+        });
         seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
     }
 
@@ -84,19 +87,27 @@ pub fn anim_note_by_time(
     {
         let anim_duration = t0 + time3 - seq.cursor_sec();
         let note_setup = note_setup.clone();
-        let anim = move |alpha| {
+        let anim = Pure(move |alpha| {
             let rect_y_pos = (scroll_height - note_height) * (1. - alpha);
             let rect_bottom_left = origin + DVec3::Y * rect_y_pos;
-            Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, note_height))
-                .with(&note_setup)
-        };
+            Rectangle::new(key_width, note_height)
+                .transformed(Translation::identity())
+                .with(|item| {
+                    item.move_anchor_to(AabbPoint(dvec3(-1., -1., 0.)), rect_bottom_left);
+                    note_setup(&mut item.inner);
+                })
+        });
         seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
     } else
     // Case 2
     // Stage 2: note occupying the full height of scroll area
     {
-        let rect =
-            Rectangle::from_min_size(origin, dvec2(key_width, scroll_height)).with(&note_setup);
+        let rect = Rectangle::new(key_width, scroll_height)
+            .transformed(Translation::identity())
+            .with(|item| {
+                item.move_anchor_to(AabbPoint(dvec3(-1., -1., 0.)), origin);
+                note_setup(&mut item.inner);
+            });
         seq.push(rect.show()).hold_to(t0 + time3).push(rect.hide());
     }
 
@@ -104,10 +115,15 @@ pub fn anim_note_by_time(
     {
         let anim_duration = t0 + time4 - seq.cursor_sec();
         let note_setup = note_setup.clone();
-        let anim = move |alpha| {
+        let anim = Pure(move |alpha| {
             let rect_height = scroll_speed * anim_duration * (1. - alpha);
-            Rectangle::from_min_size(origin, dvec2(key_width, rect_height)).with(&note_setup)
-        };
+            Rectangle::new(key_width, rect_height)
+                .transformed(Translation::identity())
+                .with(|item| {
+                    item.move_anchor_to(AabbPoint(dvec3(-1., -1., 0.)), origin);
+                    note_setup(&mut item.inner);
+                })
+        });
         seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
     }
 }
@@ -215,14 +231,17 @@ pub fn anim_note_by_beat(
             let anim_duration = end_time - seq.cursor_sec();
             let note_setup = note_setup.clone();
 
-            let anim = move |alpha| {
+            let anim = Pure(move |alpha| {
                 let cur_beat = tick_to_beat(begin_tick).lerp(&tick_to_beat(end_tick), alpha);
-
                 let dy = (cur_beat - beat1) * scroll_speed;
-                let rect_bottom_left = top - dy * DVec3::Y;
 
-                Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, dy)).with(&note_setup)
-            };
+                Rectangle::new(key_width, dy)
+                    .transformed(Translation::identity())
+                    .with(|item| {
+                        item.move_anchor_to(AabbPoint(dvec3(-1., 1., 0.)), top);
+                        note_setup(&mut item.inner);
+                    })
+            });
 
             seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
         }
@@ -241,24 +260,31 @@ pub fn anim_note_by_beat(
             let anim_duration = end_time - seq.cursor_sec();
             let note_setup = note_setup.clone();
 
-            let anim = move |alpha| {
+            let anim = Pure(move |alpha| {
                 let cur_beat = tick_to_beat(begin_tick).lerp(&tick_to_beat(end_tick), alpha);
 
                 let dy = (cur_beat - beat1) * scroll_speed;
                 let rect_bottom_left = top - dy * DVec3::Y;
 
-                Rectangle::from_min_size(rect_bottom_left, dvec2(key_width, note_height))
-                    .with(&note_setup)
-            };
-
+                Rectangle::new(key_width, note_height)
+                    .transformed(Translation::identity())
+                    .with(|item| {
+                        item.move_anchor_to(AabbPoint(dvec3(-1., -1., 0.)), rect_bottom_left);
+                        note_setup(&mut item.inner);
+                    })
+            });
             seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
         }
     } else
     // Case 2
     // Stage 2: note occupying the full height of scroll area
     {
-        let rect =
-            Rectangle::from_min_size(origin, dvec2(key_width, scroll_height)).with(&note_setup);
+        let rect = Rectangle::new(key_width, scroll_height)
+            .transformed(Translation::identity())
+            .with(|item| {
+                item.move_anchor_to(AabbPoint(dvec3(-1., -1., 0.)), origin);
+                note_setup(&mut item.inner);
+            });
         let end_time = t0 + time_unit_to_time(time_unit_3);
         seq.push(rect.show()).forward_to(end_time).push(rect.hide());
     }
@@ -272,14 +298,18 @@ pub fn anim_note_by_beat(
         for ((begin_tick, _), (end_tick, end_time_unit)) in points.tuple_windows() {
             let end_time = time_unit_to_time(end_time_unit);
             let anim_duration = t0 + end_time - seq.cursor_sec();
-            let note_setup = note_setup.clone();
 
-            let anim = move |alpha| {
+            let note_setup = note_setup.clone();
+            let anim = Pure(move |alpha| {
                 let cur_beat = tick_to_beat(begin_tick).lerp(&tick_to_beat(end_tick), alpha);
                 let rect_height = (beat4 - cur_beat) * scroll_speed;
-                Rectangle::from_min_size(origin, dvec2(key_width, rect_height)).with(&note_setup)
-            };
-
+                Rectangle::new(key_width, rect_height)
+                    .transformed(Translation::identity())
+                    .with(|item| {
+                        item.move_anchor_to(AabbPoint(dvec3(-1., -1., 0.)), origin);
+                        note_setup(&mut item.inner);
+                    })
+            });
             seq.push(anim.with_duration(anim_duration).with_rate_func(linear));
         }
     }

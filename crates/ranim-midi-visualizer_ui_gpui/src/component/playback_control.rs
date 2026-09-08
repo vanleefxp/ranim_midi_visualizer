@@ -497,6 +497,7 @@ impl RenderOnce for PlaybackControl {
             .id(element_id)
             .key_context(CONTEXT)
             .when(!disabled, |v| v.track_focus(&focus_handle))
+            .text_sm()
             .h_auto()
             .w_full()
             .flex()

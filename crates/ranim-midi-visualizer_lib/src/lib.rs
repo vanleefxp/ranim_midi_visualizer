@@ -95,9 +95,9 @@ pub fn midi_visualizer_scene(
     let frame_ry = frame_height / 2.;
     let frame_bottom_left = dvec3(-frame_rx, -frame_ry, 0.);
     let frame_bottom_right = dvec3(frame_rx, -frame_ry, 0.);
-    let frame_top_left = dvec3(-frame_width / 2., frame_height / 2., 0.);
+    // let frame_top_left = dvec3(-frame_width / 2., frame_height / 2., 0.);
     let progress_bar_height = config.progress_bar_config.height;
-    let progress_bar_min = frame_top_left - DVec3::Y * progress_bar_height;
+    // let progress_bar_min = frame_top_left - DVec3::Y * progress_bar_height;
     let status_bar_height = config.status_bar_config.height();
 
     // a template of the piano keyboard item
@@ -169,23 +169,28 @@ pub fn midi_visualizer_scene(
     //
     {
         // Bottom rect for status bar
-        let i_status_bar_rect =
-            Rectangle::from_min_size(frame_bottom_left, dvec2(frame_width, status_bar_height))
-                .with(|item| {
-                    item.set_color(config.status_bar_config.bg_color)
-                        .set_stroke_opacity(0.)
-                        .shift(DVec3::NEG_Z * 1e-4)
-                        .discard()
-                });
+        let i_status_bar_rect = Rectangle::new(frame_width, status_bar_height)
+            .with(|item| {
+                item.set_color(config.status_bar_config.bg_color)
+                    .set_stroke_opacity(0.);
+            })
+            .transformed(Translation(dvec3(
+                0.,
+                (-frame_height + status_bar_height) / 2.,
+                -1e-4,
+            )));
+
         // top rect for progress bar
-        let i_progress_bar_rect =
-            Rectangle::from_min_size(progress_bar_min, dvec2(frame_width, progress_bar_height))
-                .with(|item| {
-                    item.set_fill_color(config.progress_bar_config.bg_color)
-                        .set_stroke_opacity(0.)
-                        .shift(DVec3::Z * 1e-4)
-                        .discard()
-                });
+        let i_progress_bar_rect = Rectangle::new(frame_width, progress_bar_height)
+            .with(|item| {
+                item.set_color(config.progress_bar_config.bg_color)
+                    .set_stroke_opacity(0.);
+            })
+            .transformed(Translation(dvec3(
+                0.,
+                (frame_height - progress_bar_height) / 2.,
+                1e-4,
+            )));
 
         macro show_each($($item: expr),*$(,)?) {
             $(r.play($item.show().with_duration(video_duration_sec));)*
@@ -197,21 +202,21 @@ pub fn midi_visualizer_scene(
     //
     {
         let fg_color = config.progress_bar_config.fg_color;
-        let progress_bar_setup = move |item: &mut Rectangle| {
-            item.set_fill_color(fg_color)
-                .set_stroke_opacity(0.)
-                .shift(DVec3::Z * 2e-4)
-                .discard()
-        };
         r.play(seq!().with(|v| {
             v.forward_to(to_scene_time(0))
                 .push(
-                    (move |t: f64| {
-                        Rectangle::from_min_size(
-                            progress_bar_min,
-                            dvec2(t * frame_width, progress_bar_height),
-                        )
-                        .with(progress_bar_setup)
+                    Pure(move |t: f64| {
+                        Rectangle::new(t * frame_width, progress_bar_height)
+                            .with(|item: &mut Rectangle| {
+                                item.set_fill_color(fg_color)
+                                    .set_stroke_opacity(0.)
+                                    .discard()
+                            })
+                            .transformed(Translation(dvec3(
+                                (t - 1.) / 2. * frame_width,
+                                (frame_height - progress_bar_height) / 2.,
+                                2e-4,
+                            )))
                     })
                     .with_duration(music_duration_sec),
                 )
@@ -236,13 +241,16 @@ pub fn midi_visualizer_scene(
 
             TextItem::new(src, font_size)
                 .with_font(font.clone())
-                .with(|item| item.move_anchor_to(Origin, origin).discard())
+                .transformed(Translation::identity())
+                .with(|item| {
+                    item.move_anchor_to(Origin, origin);
+                })
         };
         let mut seq = seq!(create_timer_text(0.).show().with_duration(to_scene_time(0)));
         {
             let create_timer_text = create_timer_text.clone();
             seq.push(
-                (move |t| create_timer_text(t * music_duration_sec))
+                Pure(move |t| create_timer_text(t * music_duration_sec))
                     .with_duration(music_duration_sec)
                     .with_rate_func(linear),
             );
@@ -264,7 +272,10 @@ pub fn midi_visualizer_scene(
             let src = format!("NOTE COUNT {n} / {note_count_total}");
             TextItem::new(src, font_size)
                 .with_font(font.clone())
-                .with(|item| item.move_anchor_to(Origin, origin).discard())
+                .transformed(Translation::identity())
+                .with(|item| {
+                    item.move_anchor_to(Origin, origin);
+                })
         };
 
         let mut i_note_count = create_note_count_text(0);
@@ -296,7 +307,10 @@ pub fn midi_visualizer_scene(
             let nps_max = note_rate_to_nps(note_rate_max);
             TextItem::new(format!("NPS (MAX) {nps:.0} ({nps_max:.0})"), font_size)
                 .with_font(font.clone())
-                .with(|item| item.move_anchor_to(Origin, origin).discard())
+                .transformed(Translation::identity())
+                .with(|item| {
+                    item.move_anchor_to(Origin, origin);
+                })
         };
 
         let mut note_rate_max = 0;
@@ -327,7 +341,10 @@ pub fn midi_visualizer_scene(
         let create_legato_text = move |legato_index: f64| {
             TextItem::new(format!("LEGATO {:.3}", legato_index), font_size)
                 .with_font(font.clone())
-                .with(|item| item.move_anchor_to(Origin, origin).discard())
+                .transformed(Translation::identity())
+                .with(|item| {
+                    item.move_anchor_to(Origin, origin);
+                })
         };
 
         let i_text = create_legato_text(0.);
@@ -340,7 +357,7 @@ pub fn midi_visualizer_scene(
                 // clone values so that they can be moved into the closure
                 let create_legato_text = create_legato_text.clone();
                 seq.push(
-                    (move |t| create_legato_text(v1.lerp(&v2, t)))
+                    Pure(move |t| create_legato_text(v1.lerp(&v2, t)))
                         .with_duration(to_scene_time(t2) - seq.cursor_sec())
                         .with_rate_func(linear),
                 );
@@ -420,14 +437,12 @@ pub fn midi_visualizer_scene(
 
         let note_setup = move |item: &mut Rectangle| {
             item.set_fill_color(color.with_alpha(f64::from(velocity) as f32))
-                .set_stroke_opacity(0.);
-            let pos = AabbPoint::CENTER.locate(item);
-            let scale_factor = h_scale[is_black as usize];
-            let scale = dvec3(scale_factor.into(), 1., 1.);
-            item.move_to(DVec3::ZERO).scale(scale).move_to(pos);
+                .set_stroke_opacity(0.)
+                .scale_axes(dvec2(h_scale[is_black as usize].into(), 1.));
         };
 
         let mut seq = seq!();
+        seq.forward_to(buf_time[0].into());
         match metric_base {
             Time => {
                 let Range {
@@ -436,7 +451,6 @@ pub fn midi_visualizer_scene(
                 } = tick_range;
                 let start_time_unit = song.time_map().eval(&start_tick, true);
                 let end_time_unit = song.time_map().eval(&end_tick, true);
-                seq.forward_to(buf_time[0].into());
                 anim_note_by_time(
                     &mut seq,
                     &i_keyboard_tem,

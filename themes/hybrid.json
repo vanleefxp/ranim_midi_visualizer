@@ -7,6 +7,10 @@
     {
       "name": "Hybrid Light",
       "mode": "light",
+      "font.size": 14,
+      "font.family": "Fira Sans",
+      "mono_font.size": 12,
+      "mono_font.family": "Maple Mono NF CN",
       "shadow": false,
       "colors": {
         "accent.background": "#c8ced1",
@@ -152,6 +156,10 @@
     {
       "name": "Hybrid Dark",
       "mode": "dark",
+      "font.size": 14,
+      "font.family": "Fira Sans",
+      "mono_font.size": 12,
+      "mono_font.family": "Maple Mono NF CN",
       "colors": {
         "accent.background": "#31393a",
         "accent.foreground": "#e8e8e8",
