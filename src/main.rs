@@ -101,13 +101,7 @@ fn main() -> Result<()> {
     match cmd.get_matches_mut().subcommand() {
         Some(("render", matches)) => render(matches),
         Some(("preview", matches)) if cfg!(feature = "preview") => preview(matches),
-        _ => {
-            #[cfg(feature = "ui")]
-            ui();
-            #[cfg(not(feature = "ui"))]
-            cmd.print_long_help()?;
-            Ok(())
-        }
+        _ => Ok(cmd.print_long_help()?),
     }
 }
 
@@ -292,10 +286,4 @@ fn preview(matches: &ArgMatches) -> Result<()> {
     run_app(app);
 
     Ok(())
-}
-
-#[cfg(feature = "ui")]
-fn ui() {
-    use ranim_midi_visualizer_ui_gpui::run_app;
-    run_app();
 }
