@@ -84,7 +84,7 @@ fn main() -> Result<()> {
     };
     let mut cmd = command!();
 
-    let mut cmd_render = Command::new("render");
+    let mut cmd_render = Command::new("render").about("Render the MIDI file to scrolling video.");
     cmd_render = add_common_args(cmd_render);
     cmd_render = cmd_render
     .arg(arg!(-f --format <VALUE> "Output video format. Supported values are: mp4, mov, webm, gif.").default_value("mp4"))
@@ -92,15 +92,18 @@ fn main() -> Result<()> {
     .arg(arg!(buffer_count: --buf <INT> "Buffer count used for multiple buffering.").default_value("2"));
     cmd = cmd.subcommand(cmd_render);
 
-    if cfg!(feature = "preview") {
-        let mut cmd_preview = Command::new("preview");
+    #[cfg(feature = "preview")]
+    {
+        let mut cmd_preview =
+            Command::new("preview").about("Open a UI window to preview the render effect.");
         cmd_preview = add_common_args(cmd_preview);
         cmd = cmd.subcommand(cmd_preview);
     }
 
     match cmd.get_matches_mut().subcommand() {
         Some(("render", matches)) => render(matches),
-        Some(("preview", matches)) if cfg!(feature = "preview") => preview(matches),
+        #[cfg(feature = "preview")]
+        Some(("preview", matches)) => preview(matches),
         _ => Ok(cmd.print_long_help()?),
     }
 }
@@ -272,6 +275,7 @@ fn render(matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "preview")]
 fn preview(matches: &ArgMatches) -> Result<()> {
     use ranim::cmd::preview::{RanimPreviewApp, run_app};
 

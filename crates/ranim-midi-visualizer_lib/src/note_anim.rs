@@ -286,7 +286,7 @@ pub fn anim_note_by_beat(
                 note_setup(&mut item.inner);
             });
         let end_time = t0 + time_unit_to_time(time_unit_3);
-        seq.push(rect.show()).forward_to(end_time).push(rect.hide());
+        seq.push(rect.show()).hold_to(end_time).push(rect.hide());
     }
 
     // Stage 3: note leaving scroll area
