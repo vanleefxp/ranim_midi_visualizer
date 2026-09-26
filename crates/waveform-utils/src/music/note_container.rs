@@ -1,5 +1,4 @@
 use std::{
-    alloc::Allocator,
     collections::BTreeMap,
     ops::{Bound::*, IntoBounds as _, Range},
 };
@@ -20,7 +19,7 @@ impl<'a, Pitch: 'a> From<Endpoint<'a, Metric, Note<Pitch>>> for NoteInstant<'a, 
         let Endpoint {
             is_end,
             at,
-            pair: (range, note),
+            data: (range, note),
         } = value;
         let at = *at;
         let range = range.clone();
@@ -241,7 +240,7 @@ macro instants_with_pos($iter:expr) {
     $iter.map(|instant| ((), instant.into()))
 }
 
-impl<Pitch, A: Allocator + Clone> NoteContainer for IntervalTree<Metric, Note<Pitch>, A> {
+impl<Pitch> NoteContainer for IntervalTree<Metric, Note<Pitch>> {
     type Pitch = Pitch;
 
     fn notes_by_start(&self) -> impl Iterator<Item = ((), Range<Metric>, &Note<Pitch>)> {

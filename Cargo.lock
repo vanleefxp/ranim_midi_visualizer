@@ -5969,6 +5969,7 @@ name = "simple-interval-tree"
 version = "0.1.0-alpha"
 dependencies = [
  "itertools 0.14.0",
+ "slotmap",
  "smallvec",
  "tracing",
  "tracing-test",

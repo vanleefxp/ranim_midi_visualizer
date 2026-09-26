@@ -58,7 +58,7 @@ pub struct StatusBarConfig {
     #[derivative(Default(value = "[dvec2(0.1, 0.1), dvec2(0.1, 0.05)]"))]
     pub padding: [DVec2; 2],
     /// background color
-    #[derivative(Default(value = "AlphaColor::BLACK.with_alpha(0.9)"))] // rgba(0, 0, 0, 0.9)
+    #[derivative(Default(value = "AlphaColor::BLACK.with_alpha(0.6)"))] // rgba(0, 0, 0, 0.6)
     pub bg_color: AlphaColor<Srgb>,
     /// text color
     #[derivative(Default(value = "AlphaColor::WHITE"))]
