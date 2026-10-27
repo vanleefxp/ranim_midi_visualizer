@@ -1,4 +1,4 @@
-use std::alloc::Allocator;
+use std::alloc::AllocatorClone;
 
 use simple_interval_tree::MultiValueBTreeMap;
 
@@ -22,7 +22,7 @@ pub trait ControlContainer {
     }
 }
 
-impl<Control, A: Allocator + Clone> ControlContainer for MultiValueBTreeMap<Metric, Control, A> {
+impl<Control, A: AllocatorClone> ControlContainer for MultiValueBTreeMap<Metric, Control, A> {
     type Control = Control;
 
     fn controls_during<R>(

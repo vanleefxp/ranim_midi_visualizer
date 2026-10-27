@@ -1,5 +1,5 @@
 #![feature(
-    allocator_api,
+    allocator_ext,
     associated_type_defaults,
     btreemap_alloc,
     unboxed_closures,
@@ -68,10 +68,29 @@ impl<K, V> IntervalTree<K, V> {
     pub fn get_mut(&mut self, node: Node) -> Option<&mut <Self as Index<Node>>::Output> {
         self.data.get_mut(node)
     }
+
+    /// Returns `true` if the interval tree contains `node`.
+    pub fn contains_node(&self, node: Node) -> bool {
+        self.data.contains_key(node)
+    }
+
+    /// Returns a reference to value corresponding to the node without checking the existence of
+    /// the node.
+    ///
+    /// # Safety
+    /// This should only be used if `self.contains_node(node)` is true.
+    /// Otherwise it is potentially unsafe.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, node: Node) -> &<Self as Index<Node>>::Output {
         unsafe { self.data.get_unchecked(node) }
     }
+
+    /// Returns a mutable reference to value corresponding to the node without checking the
+    /// existence of the node.
+    ///
+    /// # Safety
+    /// This should only be used if `self.contains_node(node)` is true.
+    /// Otherwise it is potentially unsafe.
     #[inline(always)]
     pub unsafe fn get_unchecked_mut(&mut self, node: Node) -> &mut <Self as Index<Node>>::Output {
         unsafe { self.data.get_unchecked_mut(node) }
@@ -92,10 +111,12 @@ impl<K, V> IntervalTree<K, V> {
         K: Ord,
     {
         if let Some((Range { start, end }, value)) = self.data.remove(node) {
-            self.starts
-                .get_mut(&start)
-                .map(|v| v.retain(|v| *v != node));
-            self.ends.get_mut(&end).map(|v| v.retain(|v| *v != node));
+            if let Some(v) = self.starts.get_mut(&start) {
+                v.retain(|v| *v != node)
+            }
+            if let Some(v) = self.ends.get_mut(&end) {
+                v.retain(|v| *v != node)
+            }
             Some(value)
         } else {
             None

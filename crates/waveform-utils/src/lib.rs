@@ -5,7 +5,7 @@
     decl_macro,
     mapped_lock_guards,
     range_into_bounds,
-    allocator_api,
+    allocator_ext,
     associated_type_defaults,
     trait_alias,
     clamp_magnitude

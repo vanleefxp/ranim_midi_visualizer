@@ -1,4 +1,4 @@
-set shell := ["powershell"]
+set windows-shell := ["powershell"]
 
 install:
     cargo install --path . --locked

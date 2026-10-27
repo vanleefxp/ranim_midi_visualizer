@@ -1,5 +1,5 @@
 use std::{
-    alloc::{Allocator, Global},
+    alloc::{AllocatorClone, Global},
     collections::BTreeMap,
     fmt::Debug,
     iter,
@@ -9,7 +9,7 @@ use std::{
 use smallvec::SmallVec;
 
 #[derive(Clone)]
-pub struct MultiValueBTreeMap<K, V, A: Allocator + Clone = Global> {
+pub struct MultiValueBTreeMap<K, V, A: AllocatorClone = Global> {
     map: BTreeMap<K, SmallVec<[V; 1]>, A>,
     len: usize,
 }
@@ -23,7 +23,7 @@ impl<K, V> Default for MultiValueBTreeMap<K, V> {
     }
 }
 
-impl<K: Debug + Ord, V: Debug, A: Allocator + Clone> Debug for MultiValueBTreeMap<K, V, A> {
+impl<K: Debug + Ord, V: Debug, A: AllocatorClone> Debug for MultiValueBTreeMap<K, V, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_map().entries(self.iter()).finish()
     }
@@ -38,7 +38,7 @@ impl<K, V> MultiValueBTreeMap<K, V> {
     }
 }
 
-impl<K, V, A: Allocator + Clone> MultiValueBTreeMap<K, V, A> {
+impl<K, V, A: AllocatorClone> MultiValueBTreeMap<K, V, A> {
     pub fn new_in(alloc: A) -> Self {
         Self {
             map: BTreeMap::new_in(alloc),
@@ -55,7 +55,7 @@ impl<K: Ord, V> FromIterator<(K, V)> for MultiValueBTreeMap<K, V> {
     }
 }
 
-impl<K: Ord, V, A: Allocator + Clone> Extend<(K, V)> for MultiValueBTreeMap<K, V, A> {
+impl<K: Ord, V, A: AllocatorClone> Extend<(K, V)> for MultiValueBTreeMap<K, V, A> {
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         for (k, v) in iter {
             self.insert(k, v);
@@ -114,7 +114,7 @@ impl<K: Clone, V> Fn<((K, Bucket<V>),)> for ToBucketIter {
 type MapIntoIter<K, V, A> = <BTreeMap<K, Bucket<V>, A> as IntoIterator>::IntoIter;
 pub type IntoIter<K, V, A> = iter::FlatMap<MapIntoIter<K, V, A>, BucketIter<K, V>, ToBucketIter>;
 
-impl<K: Ord + Clone, V, A: Allocator + Clone> IntoIterator for MultiValueBTreeMap<K, V, A> {
+impl<K: Ord + Clone, V, A: AllocatorClone> IntoIterator for MultiValueBTreeMap<K, V, A> {
     type Item = (K, V);
     type IntoIter = IntoIter<K, V, A>;
 
@@ -123,7 +123,7 @@ impl<K: Ord + Clone, V, A: Allocator + Clone> IntoIterator for MultiValueBTreeMa
     }
 }
 
-impl<K: Ord, V, A: Allocator + Clone> MultiValueBTreeMap<K, V, A> {
+impl<K: Ord, V, A: AllocatorClone> MultiValueBTreeMap<K, V, A> {
     pub fn insert(&mut self, k: K, v: V) {
         self.map.entry(k).or_default().push(v);
         self.len += 1;
@@ -155,7 +155,7 @@ impl<K: Ord, V, A: Allocator + Clone> MultiValueBTreeMap<K, V, A> {
     }
 }
 
-impl<K, V, A: Allocator + Clone> MultiValueBTreeMap<K, V, A> {
+impl<K, V, A: AllocatorClone> MultiValueBTreeMap<K, V, A> {
     pub fn clear(&mut self) {
         self.map.clear();
         self.len = 0;
