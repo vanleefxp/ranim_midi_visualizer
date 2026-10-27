@@ -13,9 +13,9 @@ ranim-midi-visualizer_math = { workspace = true }
 
 midly = "0.5.3"
 serde = { workspace = true, optional = true, features = ["serde_derive"] }
-malachite-base = "0.9.1"
+# malachite-base = "0.9.1"
 itertools = { workspace = true }
-glam = "0.30.10"
+# glam = "0.30.10"
 color = "0.3.2"
 music-utils = { workspace = true }
 waveform-utils = { workspace = true }
@@ -29,7 +29,7 @@ enum-ordinalize = { workspace = true }
 [features]
 serde = [
     "dep:serde",
-    "glam/serde",
+    # "glam/serde",
     "color/serde",
     "ranim_music/serde",
     # "structured-midi/serde",

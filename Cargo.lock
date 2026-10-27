@@ -2456,15 +2456,6 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.30.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
-name = "glam"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
@@ -3642,18 +3633,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "malachite-base"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4f44099731f17094b07825c88ccb5fbd1bfa1f82fafff7daa33e8b8652db16e"
-dependencies = [
- "hashbrown 0.16.1",
- "itertools 0.14.0",
- "libm",
- "ryu",
 ]
 
 [[package]]
@@ -5230,9 +5209,7 @@ dependencies = [
  "derivative",
  "derive_more",
  "enum-ordinalize",
- "glam 0.30.10",
  "itertools 0.14.0",
- "malachite-base",
  "midly",
  "music-utils",
  "ranim",
@@ -5255,7 +5232,6 @@ dependencies = [
  "itertools 0.14.0",
  "ordered-float",
  "rand 0.10.2",
- "ranim",
  "tracing",
  "tracing-test",
  "typed_floats",
@@ -7714,7 +7690,6 @@ dependencies = [
  "itertools 0.14.0",
  "midly",
  "num-complex",
- "paste",
  "ranim-midi-visualizer_math",
  "simple-interval-tree",
  "smallvec",
